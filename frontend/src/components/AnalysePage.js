@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import StatsCharts from './StatsCharts';
 import ContraintesCheck from './ContraintesCheck';
+import Button from 'react-bootstrap/Button';
 
 function AnalysePage() {
   const [analysisData, setAnalysisData] = useState(null);
@@ -35,13 +36,13 @@ function AnalysePage() {
       <h2>Analyse du planning généré</h2>
       <p>Cette page permet d'analyser le planning généré et de vérifier le respect des contraintes.</p>
 
-      <button 
+      <Button 
         onClick={fetchAnalysis} 
         disabled={loading}
         className="analyse-button"
       >
         {loading ? 'Analyse en cours...' : 'Analyser le planning'}
-      </button>
+      </Button>
 
       {error && (
         <div className="error-message">

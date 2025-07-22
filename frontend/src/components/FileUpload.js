@@ -1,4 +1,5 @@
 import React, { useRef } from 'react';
+import Form from 'react-bootstrap/Form';
 
 function FileUpload({ setPreview, setStatus }) {
   const fileInput = useRef();
@@ -27,7 +28,10 @@ function FileUpload({ setPreview, setStatus }) {
   return (
     <div>
       <h2>Importer un fichier de créneaux (.csv)</h2>
-      <input type="file" accept=".csv" ref={fileInput} onChange={handleUpload} />
+      <Form.Group controlId="formFile" className="mb-3">
+        <Form.Label>Default file input example</Form.Label>
+        <Form.Control type="file" accept=".csv" onChange={handleUpload} />
+      </Form.Group>
     </div>
   );
 }

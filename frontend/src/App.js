@@ -5,6 +5,8 @@ import GenerateButton from './components/GenerateButton';
 import DownloadButton from './components/DownloadButton';
 import AnalysePage from './components/AnalysePage';
 import GroupeDetails from './components/GroupeDetails';
+import Navbar from 'react-bootstrap/Navbar';
+import Nav from 'react-bootstrap/Nav';
 import './App.css';
 
 function App() {
@@ -18,27 +20,20 @@ function App() {
       <h1>Générateur de planning de colles</h1>
 
       {/* Navigation */}
-      <div className="navigation">
-        <button 
-          className={currentPage === 'planning' ? 'nav-active' : 'nav-button'}
-          onClick={() => setCurrentPage('planning')}
-        >
-          Planning
-        </button>
-        <button 
-          className={currentPage === 'analyse' ? 'nav-active' : 'nav-button'}
-          onClick={() => setCurrentPage('analyse')}
-        >
-          Analyse
-        </button>
-
-        <button 
-          className={currentPage === 'groupe' ? 'nav-active' : 'nav-button'}
-          onClick={() => setCurrentPage('groupe')}
-        >
-         Détail groupe
-        </button>
-      </div>
+      <Navbar bg="primary" variant="dark" expand="md" className="mb-4">
+        <Navbar.Toggle aria-controls="main-navbar-nav" />
+        <Navbar.Collapse id="main-navbar-nav">
+          <Nav
+            activeKey={currentPage}
+            onSelect={selectedKey => setCurrentPage(selectedKey)}
+            className="me-auto"
+          >
+            <Nav.Link eventKey="planning">Planning</Nav.Link>
+            <Nav.Link eventKey="analyse">Analyse</Nav.Link>
+            <Nav.Link eventKey="groupe">Détail groupe</Nav.Link>
+          </Nav>
+        </Navbar.Collapse>
+      </Navbar>
 
       {currentPage === 'planning' && (
         <div>

@@ -1,4 +1,5 @@
 import React from 'react';
+import Button from 'react-bootstrap/Button';
 
 function GenerateButton({ setPlanning, setStatus }) {
   const handleGenerate = async () => {
@@ -17,9 +18,9 @@ function GenerateButton({ setPlanning, setStatus }) {
   };
 
   return (
-    <button onClick={handleGenerate} style={{marginTop: '1em'}}>
+    <Button onClick={handleGenerate} style={{marginTop: '1em'}}>
       Générer le planning
-    </button>
+    </Button>
   );
 }
 
