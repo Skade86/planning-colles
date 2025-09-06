@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 import csv
@@ -304,6 +304,7 @@ def extend_to_24_weeks(df8_weeks_csv: str, original_csv: str) -> pd.DataFrame:
 
             df8[new_week_str] = col_rot
             
+    # ⚡ Corriger les numéros de groupes : forcer en entiers ou vide
     for col in df8.columns:
         if str(col).isdigit():
             df8[col] = (
@@ -496,36 +497,62 @@ def group_details(groupe_id: int):
         )
 
 @app.get("/api/download_planning")
-def download_planning():
+async def download_planning(format: str = Query("csv", enum=["csv", "excel"])):
     global generated_planning
     if not generated_planning:
         return JSONResponse(status_code=400, content={"error": "Aucun planning généré."})
     
-    return StreamingResponse(
-        io.StringIO(generated_planning),
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=planning_optimise.csv"}
-    )
+    df = pd.read_csv(io.StringIO(generated_planning), sep=';')
+    
+    if format == "excel":
+        out = io.BytesIO()
+        with pd.ExcelWriter(out, engine="xlsxwriter") as writer:
+            df.to_excel(writer, index=False, sheet_name="Planning")
+        out.seek(0)
+        return StreamingResponse(
+            out,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=planning_optimise.xlsx"}
+        )
+    else:  # CSV par défaut
+        return StreamingResponse(
+            io.StringIO(generated_planning),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=planning_optimise.csv"}
+        )
 
 @app.post("/api/extend_planning")
-async def extend_planning():
+async def extend_planning(format: str = Query("csv", enum=["csv", "excel"])):
     """
     Étend le planning 8 semaines actuel à 24 semaines par rotations internes
     aux familles de groupes détectées automatiquement à partir du CSV initial.
+    Le résultat est renvoyé soit en CSV (par défaut), soit en Excel si ?format=excel
     """
     global uploaded_csv, generated_planning
     if not uploaded_csv or not generated_planning:
         return JSONResponse(status_code=400, content={"error": "Générez d'abord un planning 8 semaines."})
+    
     try:
         df24 = extend_to_24_weeks(generated_planning, uploaded_csv)
-        out = io.StringIO()
-        df24.to_csv(out, sep=';', index=False)
-        csv_bytes = out.getvalue()
-        return StreamingResponse(
-            io.StringIO(csv_bytes),
-            media_type="text/csv",
-            headers={"Content-Disposition": "attachment; filename=planning_24_semaines.csv"}
-        )
+        
+        if format == "excel":
+            out = io.BytesIO()
+            with pd.ExcelWriter(out, engine="xlsxwriter") as writer:
+                df24.to_excel(writer, index=False, sheet_name="Planning")
+            out.seek(0)
+            return StreamingResponse(
+                out,
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={"Content-Disposition": "attachment; filename=planning_24_semaines.xlsx"}
+            )
+        else:  # CSV par défaut
+            out = io.StringIO()
+            df24.to_csv(out, sep=';', index=False)
+            return StreamingResponse(
+                io.StringIO(out.getvalue()),
+                media_type="text/csv",
+                headers={"Content-Disposition": "attachment; filename=planning_24_semaines.csv"}
+            )
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Extension impossible: {str(e)}"})
 

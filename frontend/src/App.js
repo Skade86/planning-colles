@@ -6,6 +6,7 @@ import DownloadButton from './components/DownloadButton';
 import AnalysePage from './components/AnalysePage';
 import GroupeDetails from './components/GroupeDetails';
 import Extend24Button from './components/Extend24Button';
+import FormatToggle from './components/FormatToggle';
 import Navbar from 'react-bootstrap/Navbar';
 import Nav from 'react-bootstrap/Nav';
 import './App.css';
@@ -20,16 +21,21 @@ function App() {
   const [groups, setGroups] = useState([]);
   const [selectedGroup, setSelectedGroup] = useState("");
 
-  // Charger la liste des groupes après génération d’un planning
+  // Nouveau: format de téléchargement global (csv par défaut)
+  const [downloadFormat, setDownloadFormat] = useState('csv');
+
+  // Charger la liste des groupes après génération d'un planning
   useEffect(() => {
-    fetch("http://localhost:8000/api/get_groups")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.groups) {
-          setGroups(data.groups);
-        }
-      })
-      .catch((err) => console.error("Erreur chargement groupes:", err));
+    if (planning) {
+      fetch("http://localhost:8000/api/get_groups")
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.groups) {
+            setGroups(data.groups);
+          }
+        })
+        .catch((err) => console.error("Erreur chargement groupes:", err));
+    }
   }, [planning]); // ⚡ se recharge quand un planning est créé
 
   return (
@@ -63,13 +69,28 @@ function App() {
           </p>
           <FileUpload setPreview={setPreview} setStatus={setStatus} />
           {preview && <PlanningTable planning={preview} title="Prévisualisation du CSV" />}
-          <GenerateButton setPlanning={setPlanning} setStatus={setStatus} />
+
+          {/* Bouton de génération */}
+          <div className="d-flex flex-wrap gap-2 mt-2">
+            <GenerateButton setPlanning={setPlanning} setStatus={setStatus} />
+          </div>
+
+          {/* Sélecteur de format et boutons de téléchargement */}
           {planning && (
-  <>
-    <DownloadButton />
-    <Extend24Button disabled={!planning} setStatus={setStatus} />
-  </>
-)}
+            <div className="mt-3">
+              {/* Case à cocher pour choisir le format */}
+              <div className="mb-2">
+                <FormatToggle format={downloadFormat} setFormat={setDownloadFormat} />
+              </div>
+
+              {/* Boutons de téléchargement alignés */}
+              <div className="d-flex flex-wrap gap-2">
+                <DownloadButton format={downloadFormat} />
+                <Extend24Button disabled={!planning} setStatus={setStatus} format={downloadFormat} />
+              </div>
+            </div>
+          )}
+
           {planning && <PlanningTable planning={planning} title="Planning généré" />}
           {status && (
             <div className={`status-message${status.type === 'error' ? ' error' : ''}`}>
@@ -86,32 +107,32 @@ function App() {
 
       {/* Page Détail Groupe */}
       {currentPage === 'groupe' && (
-  <div style={{ padding: "1rem" }}>
-    <h2>Choisir un groupe</h2>
+        <div style={{ padding: "1rem" }}>
+          <h2>Choisir un groupe</h2>
 
-    {groups.length === 0 ? (
-      <p style={{ color: "orange" }}>
-        ⚠️ Vous devez d'abord <b>générer un planning</b> avant d'accéder aux détails des groupes.
-      </p>
-    ) : (
-      <>
-        <select
-          value={selectedGroup}
-          onChange={(e) => setSelectedGroup(e.target.value)}
-        >
-          <option value="">-- Sélectionnez un groupe --</option>
-          {groups.map((g) => (
-            <option key={g} value={g}>
-              Groupe {g}
-            </option>
-          ))}
-        </select>
+          {groups.length === 0 ? (
+            <p style={{ color: "orange" }}>
+              ⚠️ Vous devez d'abord <b>générer un planning</b> avant d'accéder aux détails des groupes.
+            </p>
+          ) : (
+            <>
+              <select
+                value={selectedGroup}
+                onChange={(e) => setSelectedGroup(e.target.value)}
+              >
+                <option value="">-- Sélectionnez un groupe --</option>
+                {groups.map((g) => (
+                  <option key={g} value={g}>
+                    Groupe {g}
+                  </option>
+                ))}
+              </select>
 
-        {selectedGroup && <GroupeDetails groupId={selectedGroup} />}
-      </>
-    )}
-  </div>
-)}
+              {selectedGroup && <GroupeDetails groupId={selectedGroup} />}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
