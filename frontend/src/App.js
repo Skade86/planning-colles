@@ -5,6 +5,7 @@ import GenerateButton from './components/GenerateButton';
 import DownloadButton from './components/DownloadButton';
 import AnalysePage from './components/AnalysePage';
 import GroupeDetails from './components/GroupeDetails';
+import Extend24Button from './components/Extend24Button';
 import Navbar from 'react-bootstrap/Navbar';
 import Nav from 'react-bootstrap/Nav';
 import './App.css';
@@ -63,7 +64,12 @@ function App() {
           <FileUpload setPreview={setPreview} setStatus={setStatus} />
           {preview && <PlanningTable planning={preview} title="Prévisualisation du CSV" />}
           <GenerateButton setPlanning={setPlanning} setStatus={setStatus} />
-          {planning && <DownloadButton />}
+          {planning && (
+  <>
+    <DownloadButton />
+    <Extend24Button disabled={!planning} setStatus={setStatus} />
+  </>
+)}
           {planning && <PlanningTable planning={planning} title="Planning généré" />}
           {status && (
             <div className={`status-message${status.type === 'error' ? ' error' : ''}`}>

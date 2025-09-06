@@ -26,7 +26,7 @@ def parse_groups(txt):
     if 'à' in txt:
         a, b = txt.split('à')
         return list(range(int(a.strip()), int(b.strip()) + 1))
-    return [int(txt.strip())]
+    return [int(str(txt).strip())]
 
 def extract_all_groups(df):
     all_groups = set()
@@ -34,6 +34,48 @@ def extract_all_groups(df):
         all_groups.update(parse_groups(row['Groupes possibles semaine paire']))
         all_groups.update(parse_groups(row['Groupes possibles semaine impaire']))
     return sorted(list(all_groups))
+
+def _unique_minimal_families(families):
+    """
+    Conserve les sous-plages minimales:
+    - élimine les familles qui sont des sur-ensembles stricts d'une autre
+    - déduplique
+    """
+    # normaliser en tuples triés uniques
+    norm = []
+    for fam in families:
+        if fam:
+            t = tuple(sorted(set(int(x) for x in fam)))
+            if t not in norm:
+                norm.append(t)
+    # enlever les sur-ensembles
+    keep = []
+    for f in norm:
+        is_superset = any(set(other).issubset(set(f)) and set(other) != set(f) for other in norm)
+        if not is_superset:
+            keep.append(f)
+    # retourner en listes
+    return [list(f) for f in keep]
+
+def detect_group_families(df):
+    """
+    Détecte automatiquement les familles de groupes à partir des colonnes
+    'Groupes possibles semaine paire' et 'Groupes possibles semaine impaire'.
+    On retourne des sous-plages minimales (ex: [1..8], [9..16] plutôt que [1..16]).
+    """
+    raw_families = []
+    for col in ['Groupes possibles semaine paire', 'Groupes possibles semaine impaire']:
+        if col not in df.columns:
+            continue
+        for _, val in df[col].dropna().items():
+            fam = parse_groups(val)
+            if fam:
+                raw_families.append(fam)
+    families = _unique_minimal_families(raw_families)
+    # si aucune famille détectée, fallback = une seule famille avec tous les groupes
+    if not families:
+        families = [extract_all_groups(df)]
+    return families
 
 
 # -----------------------
@@ -209,12 +251,76 @@ def generate_planning_with_ortools(csv_content, mode="strict"):
 
 
 # -----------------------
+# Extension à 24 semaines (rotation par familles détectées)
+# -----------------------
+def _numeric_week_cols(df):
+    return sorted([int(c) for c in df.columns if str(c).isdigit()])
+
+def extend_to_24_weeks(df8_weeks_csv: str, original_csv: str) -> pd.DataFrame:
+    """
+    df8_weeks_csv: CSV du planning déjà généré (8 semaines)
+    original_csv: CSV d'origine (pour détecter les familles)
+    Retourne un DataFrame avec 24 semaines:
+      - Bloc 1: semaines existantes (8)
+      - Bloc 2: rotation +1 cran au sein de chaque famille
+      - Bloc 3: rotation +2 crans au sein de chaque famille
+    """
+    df8 = pd.read_csv(io.StringIO(df8_weeks_csv), sep=';')
+    df_orig = pd.read_csv(io.StringIO(original_csv), sep=';')
+
+    families = detect_group_families(df_orig)  # ex: [[1..8], [9..16]]
+    print(f"[INFO] Familles détectées pour rotation: {families}")
+
+    week_cols = _numeric_week_cols(df8)
+    if len(week_cols) < 8:
+        raise ValueError("Le planning 8 semaines ne contient pas 8 colonnes de semaines numériques.")
+
+    base_weeks_sorted = week_cols[:8]
+    max_week = max(base_weeks_sorted)
+
+    # On va créer 16 nouvelles colonnes après la dernière semaine existante
+    # Bloc 2: +1 cran, Bloc 3: +2 crans
+    for block_shift in [1, 2]:
+        for idx, base_w in enumerate(base_weeks_sorted):
+            new_week = max_week + (block_shift - 1) * 8 + (idx + 1)
+            new_week_str = str(new_week)
+            base_col = df8[str(base_w)].copy()
+
+            # Appliquer la rotation famille par famille
+            col_rot = base_col.copy()
+            for fam in families:
+                fam_sorted = list(sorted(fam))
+                # mapping de remplacement pour ce shift
+                mapping = {}
+                size = len(fam_sorted)
+                if size <= 1:
+                    continue
+                # Construire mapping str(g) -> str(rotated)
+                for pos, g in enumerate(fam_sorted):
+                    rotated = fam_sorted[(pos + block_shift) % size]
+                    mapping[str(g)] = str(rotated)
+                # appliquer mapping
+                col_rot = col_rot.replace(mapping)
+
+            df8[new_week_str] = col_rot
+            
+    for col in df8.columns:
+        if str(col).isdigit():
+            df8[col] = (
+                df8[col]
+                .apply(lambda v: str(int(float(v))) if str(v).replace('.', '', 1).isdigit() else ("" if pd.isna(v) else str(v)))
+            )
+
+    return df8
+
+
+# -----------------------
 # PlanningAnalyzer (inchangé)
 # -----------------------
 class PlanningAnalyzer:
     def __init__(self, csv_content):
         self.df = pd.read_csv(io.StringIO(csv_content), sep=';')
-        self.weeks = [str(w) for w in range(38, 46)]
+        self.weeks = [str(w) for w in _numeric_week_cols(self.df)]
         self.groups = extract_all_groups(self.df)
         self.quinzaines = [(38,39),(40,41),(42,43),(44,45)]
         self.mois = [(38,39,40,41),(42,43,44,45)]
@@ -255,7 +361,7 @@ class PlanningAnalyzer:
         return prof_counts
 
     def charge_hebdo(self):
-        return {g:[self.compter_colles_groupe_semaine(g,str(w)) for w in range(38,46)] for g in self.groups}
+        return {g:[self.compter_colles_groupe_semaine(g,str(w)) for w in _numeric_week_cols(self.df)] for g in self.groups}
 
     def verifier_contraintes_groupe(self,g): return []
     def verifier_contraintes_globales(self): return []
@@ -401,6 +507,28 @@ def download_planning():
         headers={"Content-Disposition": "attachment; filename=planning_optimise.csv"}
     )
 
+@app.post("/api/extend_planning")
+async def extend_planning():
+    """
+    Étend le planning 8 semaines actuel à 24 semaines par rotations internes
+    aux familles de groupes détectées automatiquement à partir du CSV initial.
+    """
+    global uploaded_csv, generated_planning
+    if not uploaded_csv or not generated_planning:
+        return JSONResponse(status_code=400, content={"error": "Générez d'abord un planning 8 semaines."})
+    try:
+        df24 = extend_to_24_weeks(generated_planning, uploaded_csv)
+        out = io.StringIO()
+        df24.to_csv(out, sep=';', index=False)
+        csv_bytes = out.getvalue()
+        return StreamingResponse(
+            io.StringIO(csv_bytes),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=planning_24_semaines.csv"}
+        )
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"Extension impossible: {str(e)}"})
+
 @app.get("/api/hello")
 def hello(): 
-    return {"message":"Backend Planning Colles avec OR-Tools ROBUSTE (3 niveaux)"}
+    return {"message":"Backend Planning Colles avec OR-Tools (3 niveaux) + extension 24 semaines par rotation de familles"}

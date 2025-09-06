@@ -3,11 +3,11 @@ import Button from 'react-bootstrap/Button';
 
 function DownloadButton() {
   const handleDownload = () => {
-    window.open('http://localhost:8000/api/download_planning', '_blank');
+    window.location.href = 'http://localhost:8000/api/download_planning';
   };
 
   return (
-    <Button onClick={handleDownload} style={{marginTop: '1em', marginLeft: '1em', background: '#4caf50'}}>
+    <Button variant="success" onClick={handleDownload} className="me-2 mt-2">
       Télécharger le planning (CSV)
     </Button>
   );

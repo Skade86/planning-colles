@@ -13,12 +13,15 @@ function GenerateButton({ setPlanning, setStatus }) {
       setPlanning(data);
       setStatus({ type: 'success', text: 'Planning généré avec succès !' });
     } catch (error) {
-      setStatus({ type: 'error', text: "Erreur lors de la génération. Vérifiez que le backend tourne et qu'un fichier a été uploadé." });
+      setStatus({
+        type: 'error',
+        text: "Erreur lors de la génération. Vérifiez que le backend tourne et qu'un fichier a été uploadé."
+      });
     }
   };
 
   return (
-    <Button onClick={handleGenerate} style={{marginTop: '1em'}}>
+    <Button variant="primary" onClick={handleGenerate} className="me-2 mt-2">
       Générer le planning
     </Button>
   );
