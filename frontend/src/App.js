@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import FileUpload from './components/FileUpload';
 import PlanningTable from './components/PlanningTable';
 import GenerateButton from './components/GenerateButton';
@@ -13,7 +13,23 @@ function App() {
   const [planning, setPlanning] = useState(null);
   const [preview, setPreview] = useState(null);
   const [status, setStatus] = useState(null);
-  const [currentPage, setCurrentPage] = useState('planning'); // 'planning' ou 'analyse'
+  const [currentPage, setCurrentPage] = useState('planning'); // 'planning', 'analyse', 'groupe'
+
+  // Nouveaux states pour gestion groupes
+  const [groups, setGroups] = useState([]);
+  const [selectedGroup, setSelectedGroup] = useState("");
+
+  // Charger la liste des groupes après génération d’un planning
+  useEffect(() => {
+    fetch("http://localhost:8000/api/get_groups")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.groups) {
+          setGroups(data.groups);
+        }
+      })
+      .catch((err) => console.error("Erreur chargement groupes:", err));
+  }, [planning]); // ⚡ se recharge quand un planning est créé
 
   return (
     <div className="App">
@@ -35,6 +51,7 @@ function App() {
         </Navbar.Collapse>
       </Navbar>
 
+      {/* Page Planning */}
       {currentPage === 'planning' && (
         <div>
           <p>
@@ -56,13 +73,39 @@ function App() {
         </div>
       )}
 
+      {/* Page Analyse */}
       {currentPage === 'analyse' && (
         <AnalysePage />
       )}
 
+      {/* Page Détail Groupe */}
       {currentPage === 'groupe' && (
-        <GroupeDetails />
-      )}
+  <div style={{ padding: "1rem" }}>
+    <h2>Choisir un groupe</h2>
+
+    {groups.length === 0 ? (
+      <p style={{ color: "orange" }}>
+        ⚠️ Vous devez d'abord <b>générer un planning</b> avant d'accéder aux détails des groupes.
+      </p>
+    ) : (
+      <>
+        <select
+          value={selectedGroup}
+          onChange={(e) => setSelectedGroup(e.target.value)}
+        >
+          <option value="">-- Sélectionnez un groupe --</option>
+          {groups.map((g) => (
+            <option key={g} value={g}>
+              Groupe {g}
+            </option>
+          ))}
+        </select>
+
+        {selectedGroup && <GroupeDetails groupId={selectedGroup} />}
+      </>
+    )}
+  </div>
+)}
     </div>
   );
 }

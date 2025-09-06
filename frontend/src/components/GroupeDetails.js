@@ -1,88 +1,96 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
 
-export default function GroupeDetails() {
-  const [groupe, setGroupe] = useState(1);
+export default function GroupeDetails({ groupId }) {
   const [details, setDetails] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-
-  const fetchDetails = async (g) => {
-    setLoading(true);
-    setError("");
-    setDetails(null);
-    try {
-      const res = await fetch(`http://localhost:8000/api/groupe_details/${g}`);
-      const data = await res.json();
-      if (data.error) {
-        setError(data.error);
-      } else {
-        setDetails(data);
-      }
-    } catch (e) {
-      setError("Erreur lors de la récupération des détails.");
-    }
-    setLoading(false);
-  };
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    fetchDetails(groupe);
-    // eslint-disable-next-line
-  }, [groupe]);
+    if (!groupId) return;
+    setLoading(true);
+    setDetails(null);
+    setError(null);
+
+    fetch(`http://localhost:8000/api/group_details/${groupId}`)
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error("Erreur API");
+        }
+        return res.json();
+      })
+      .then((data) => {
+        setDetails(data);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("Erreur chargement détails groupe", err);
+        setError("Impossible de charger les détails du groupe.");
+        setLoading(false);
+      });
+  }, [groupId]);
+
+  if (!groupId) {
+    return <p>⚠️ Veuillez sélectionner un groupe pour voir ses détails.</p>;
+  }
+
+  if (loading) {
+    return <p>Chargement des détails...</p>;
+  }
+
+  if (error) {
+    return <p style={{ color: "red" }}>{error}</p>;
+  }
+
+  if (!details) {
+    return <p>Aucune donnée disponible pour ce groupe.</p>;
+  }
 
   return (
-    <div style={{ maxWidth: 700, margin: "auto" }}>
-      <h2>Détail d’un groupe</h2>
-      <label>
-        Groupe&nbsp;
-        <select value={groupe} onChange={e => setGroupe(Number(e.target.value))}>
-          {[...Array(16)].map((_, i) => (
-            <option key={i+1} value={i+1}>{i+1}</option>
-          ))}
-        </select>
-      </label>
-      {loading && <p>Chargement…</p>}
-      {error && <p style={{ color: "red" }}>{error}</p>}
-      {details && (
-        <div>
+    <div style={{ padding: "1rem", border: "1px solid #ccc", borderRadius: "8px" }}>
+      <h2>Détails du groupe {details.groupe}</h2>
 
-          <h3>Créneaux</h3>
-          {!details.creneaux || details.creneaux.length === 0 ? (
-            <p>Aucun créneau trouvé pour ce groupe.</p>
-          ) : (
-            <ul>
-              {details.creneaux.map((c, i) => (
-                <li key={i}>
-                  Semaine {c.semaine} : <b>{c.matiere}</b> avec {c.prof} ({c.jour} {c.heure})
-                </li>
-              ))}
-            </ul>
-          )}
-          <h3>Colles par matière</h3>
-          {details.colles_par_matiere && Object.entries(details.colles_par_matiere).map(([mat, colles]) => (
-            <div key={mat} style={{ marginBottom: 10 }}>
-              <strong>{mat} :</strong>
-              {(!colles || colles.length === 0) ? (
-                <span> aucune</span>
-              ) : (
-                <ul>
-                  {colles.map((c, i) => (
-                    <li key={i}>
-                      Semaine {c.semaine} avec {c.prof} ({c.jour} {c.heure})
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+      {/* Créneaux */}
+      <h3>📅 Créneaux planifiés</h3>
+      {details.creneaux && details.creneaux.length > 0 ? (
+        <ul>
+          {details.creneaux.map((c, index) => (
+            <li key={index}>
+              <strong>Semaine {c.semaine}</strong> : {c.matiere} avec {c.prof} (
+              {c.jour} {c.heure})
+            </li>
           ))}
-          <h3>Contraintes non respectées</h3>
-          {details.contraintes && details.contraintes.length === 0 ? (
-            <p style={{ color: "green" }}>Aucune</p>
-          ) : (
-            <ul>
-              {details.contraintes && details.contraintes.map((err, i) => <li key={i}>{err}</li>)}
-            </ul>
-          )}
-        </div>
+        </ul>
+      ) : (
+        <p>Aucun créneau trouvé pour ce groupe.</p>
+      )}
+
+      {/* Stats */}
+      <h3>📊 Statistiques</h3>
+
+      <h4>Colles par semaine</h4>
+      {details.stats && details.stats.colles_par_semaine ? (
+        <ul>
+          {Object.entries(details.stats.colles_par_semaine).map(([sem, ncol]) => (
+            <li key={sem}>
+              Semaine {sem} → {ncol} colle(s)
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p>Aucune donnée hebdomadaire.</p>
+      )}
+
+      <h4>Colles par matière</h4>
+      {details.stats && details.stats.colles_par_matiere ? (
+        <ul>
+          {Object.entries(details.stats.colles_par_matiere).map(([mat, ncol]) => (
+            <li key={mat}>
+              {mat} → {ncol} colle(s)
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p>Aucune donnée matière.</p>
       )}
     </div>
   );

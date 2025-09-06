@@ -1,7 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 function ContraintesCheck({ contraintes }) {
-  const [selectedGroup, setSelectedGroup] = useState(1);
+  const [selectedGroup, setSelectedGroup] = useState(null);
+
+  const groupesDisponibles = Object.keys(contraintes.groupes).map(Number).sort((a, b) => a - b);
+
+  // initialise le groupe sélectionné automatiquement sur le 1er dispo
+  useEffect(() => {
+    if (groupesDisponibles.length > 0 && selectedGroup === null) {
+      setSelectedGroup(groupesDisponibles[0]);
+    }
+  }, [groupesDisponibles, selectedGroup]);
 
   const totalErrorsGlobal = contraintes.globales.length;
   const totalErrorsGroups = Object.values(contraintes.groupes).reduce((sum, errors) => sum + errors.length, 0);
@@ -41,34 +50,36 @@ function ContraintesCheck({ contraintes }) {
         <div className="group-selector">
           <label>Groupe à analyser : </label>
           <select 
-            value={selectedGroup} 
+            value={selectedGroup || ''} 
             onChange={(e) => setSelectedGroup(parseInt(e.target.value))}
           >
-            {Array.from({length: 16}, (_, i) => i + 1).map(g => (
+            {groupesDisponibles.map(g => (
               <option key={g} value={g}>Groupe {g}</option>
             ))}
           </select>
         </div>
 
         {/* Affichage des erreurs pour le groupe sélectionné */}
-        <div className="group-constraints">
-          <h5>Groupe {selectedGroup}</h5>
-          {contraintes.groupes[selectedGroup].length === 0 ? (
-            <div className="success-message">✅ Toutes les contraintes respectées</div>
-          ) : (
-            <div className="error-list">
-              {contraintes.groupes[selectedGroup].map((error, index) => (
-                <div key={index} className="error-item">❌ {error}</div>
-              ))}
-            </div>
-          )}
-        </div>
+        {selectedGroup !== null && (
+          <div className="group-constraints">
+            <h5>Groupe {selectedGroup}</h5>
+            {contraintes.groupes[selectedGroup].length === 0 ? (
+              <div className="success-message">✅ Toutes les contraintes respectées</div>
+            ) : (
+              <div className="error-list">
+                {contraintes.groupes[selectedGroup].map((error, index) => (
+                  <div key={index} className="error-item">❌ {error}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Vue d'ensemble de tous les groupes */}
         <div className="all-groups-overview">
           <h5>Vue d'ensemble</h5>
           <div className="groups-grid">
-            {Array.from({length: 16}, (_, i) => i + 1).map(g => (
+            {groupesDisponibles.map(g => (
               <div 
                 key={g} 
                 className={`group-status ${contraintes.groupes[g].length === 0 ? 'success' : 'error'}`}
