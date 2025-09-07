@@ -26,36 +26,37 @@ function AnalysePage() {
       }
     } catch (e) {
       setError("Erreur de connexion au backend. Vérifiez qu'il est lancé sur localhost:8000");
+      console.log(e.data);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="analyse-page">
+    <div className="container-fluid">
       <h2>Analyse du planning généré</h2>
       <p>Cette page permet d'analyser le planning généré et de vérifier le respect des contraintes.</p>
 
-      <Button 
+     <Button 
         onClick={fetchAnalysis} 
         disabled={loading}
-        className="analyse-button"
-      >
+        variant="primary"   // ✅ comme les autres ("Générer le planning")
+>
         {loading ? 'Analyse en cours...' : 'Analyser le planning'}
       </Button>
 
       {error && (
-        <div className="error-message">
+        <div className="error-message mt-3">
           ❌ {error}
         </div>
       )}
 
       {analysisData && (
-        <div className="analysis-results">
+        <div className="analysis-results mt-4">
           <h3>📊 Statistiques</h3>
           <StatsCharts stats={analysisData.stats} />
 
-          <h3>✅ Vérification des contraintes</h3>
+          <h3 className="mt-4">✅ Vérification des contraintes</h3>
           <ContraintesCheck contraintes={analysisData.contraintes} />
         </div>
       )}

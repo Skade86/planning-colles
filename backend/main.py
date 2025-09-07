@@ -418,52 +418,85 @@ class PlanningAnalyzer:
         self.quinzaines = [(38,39),(40,41),(42,43),(44,45)]
         self.mois = [(38,39,40,41),(42,43,44,45)]
 
-    def is_group_match(self,val,groupe):
-        if pd.isna(val): return False
-        try: return int(float(val))==int(groupe)
-        except: return False
+    def is_group_match(self, val, groupe):
+        if pd.isna(val): 
+            return False
+        try:
+            return int(float(val)) == int(groupe)
+        except:
+            return False
 
-    def compter_colles_groupe_semaine(self,g,semaine):
-        if semaine not in self.df.columns: return 0
-        return sum(1 for _,row in self.df.iterrows() if self.is_group_match(row[semaine],g))
+    def compter_colles_groupe_semaine(self, g, semaine):
+        if semaine not in self.df.columns: 
+            return 0
+        return sum(1 for _,row in self.df.iterrows() if self.is_group_match(row[semaine], g))
 
     def stats_groupes(self):
-        group_counts={g:0 for g in self.groups}
+        group_counts = {g:0 for g in self.groups}
         for s in self.weeks:
-            for _,row in self.df.iterrows():
+            for _, row in self.df.iterrows():
                 try:
-                    v=int(float(row[s])) if not pd.isna(row[s]) else None
-                    if v in group_counts: group_counts[v]+=1
-                except: pass
+                    v = int(float(row[s])) if not pd.isna(row[s]) else None
+                    if v in group_counts:
+                        group_counts[v] += 1
+                except:
+                    pass
         return group_counts
 
     def stats_matieres(self):
-        mat_counts={m:0 for m in self.df['Matière'].unique()}
+        mat_counts = {m:0 for m in self.df['Matière'].unique()}
         for s in self.weeks:
-            for _,row in self.df.iterrows():
+            for _, row in self.df.iterrows():
                 for g in self.groups:
-                    if self.is_group_match(row[s],g): mat_counts[row['Matière']]+=1
+                    if self.is_group_match(row[s], g):
+                        mat_counts[row['Matière']] += 1
         return mat_counts
 
     def stats_profs(self):
-        prof_counts={p:0 for p in self.df['Prof'].unique()}
+        prof_counts = {p:0 for p in self.df['Prof'].unique()}
         for s in self.weeks:
-            for _,row in self.df.iterrows():
+            for _, row in self.df.iterrows():
                 for g in self.groups:
-                    if self.is_group_match(row[s],g): prof_counts[row['Prof']]+=1
+                    if self.is_group_match(row[s], g):
+                        prof_counts[row['Prof']] += 1
         return prof_counts
 
     def charge_hebdo(self):
-        return {g:[self.compter_colles_groupe_semaine(g,str(w)) for w in _numeric_week_cols(self.df)] for g in self.groups}
+        return {
+            g: [self.compter_colles_groupe_semaine(g, str(w)) for w in _numeric_week_cols(self.df)]
+            for g in self.groups
+        }
 
-    def verifier_contraintes_groupe(self,g): return []
-    def verifier_contraintes_globales(self): return []
+    def verifier_contraintes_groupe(self, g): 
+        return []
+
+    def verifier_contraintes_globales(self): 
+        return []
+
     def statistiques_globales(self):
-        total=len(self.df)*len(self.weeks)
-        used=sum(1 for s in self.weeks for _,row in self.df.iterrows() for g in self.groups if self.is_group_match(row[s],g))
-        return {"total_creneaux":total,"creneaux_utilises":used,"taux_utilisation":round(used/total*100,1) if total>0 else 0}
+        total = 0
+        used = 0
 
+        for s in self.weeks:
+            if s not in self.df.columns:
+                continue
+            for _, row in self.df.iterrows():
+                val = row[s]
+                # Si la cellule n'est pas vide → c'est bien un créneau "réel"
+                if not pd.isna(val) and str(val).strip() != "":
+                    total += 1
+                    # S'il contient un groupe assigné → utilisé
+                    try:
+                        if int(float(val)) in self.groups:
+                            used += 1
+                    except:
+                        pass
 
+        return {
+            "total_creneaux": total,
+            "creneaux_utilises": used,
+            "taux_utilisation": round(used/total*100, 1) if total > 0 else 0
+        }
 # -----------------------
 # API ROUTES
 # -----------------------
