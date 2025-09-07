@@ -44,9 +44,12 @@ function ContraintesCheck({ contraintes }) {
 
       {/* Contraintes par groupe */}
       <div className="contraintes-section">
-        <h4>Contraintes par groupe</h4>
+        {/* <h4>Contraintes par groupe</h4>
 
-        {/* Sélecteur de groupe */}
+        
+        === Partie détaillée à commenter ===
+
+        // Sélecteur de groupe
         <div className="group-selector">
           <label>Groupe à analyser : </label>
           <select 
@@ -59,7 +62,7 @@ function ContraintesCheck({ contraintes }) {
           </select>
         </div>
 
-        {/* Affichage des erreurs pour le groupe sélectionné */}
+        // Affichage des erreurs pour le groupe sélectionné
         {selectedGroup !== null && (
           <div className="group-constraints">
             <h5>Groupe {selectedGroup}</h5>
@@ -74,9 +77,10 @@ function ContraintesCheck({ contraintes }) {
             )}
           </div>
         )}
+        */}
 
         {/* Vue d'ensemble de tous les groupes */}
-        <div className="all-groups-overview">
+        {/*<div className="all-groups-overview">
           <h5>Vue d'ensemble</h5>
           <div className="groups-grid">
             {groupesDisponibles.map(g => (
@@ -90,7 +94,7 @@ function ContraintesCheck({ contraintes }) {
               </div>
             ))}
           </div>
-        </div>
+        </div>*/}
       </div>
     </div>
   );

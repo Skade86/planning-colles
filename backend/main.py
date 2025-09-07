@@ -429,6 +429,160 @@ class PlanningAnalyzer:
     def compter_colles_groupe_semaine(self, g, semaine):
         if semaine not in self.df.columns: 
             return 0
+        return sum(1 for _, row in self.df.iterrows() if self.is_group_match(row[semaine], g))
+
+    def stats_groupes(self):
+        group_counts = {g: 0 for g in self.groups}
+        for s in self.weeks:
+            for _, row in self.df.iterrows():
+                try:
+                    v = int(float(row[s])) if not pd.isna(row[s]) else None
+                    if v in group_counts:
+                        group_counts[v] += 1
+                except:
+                    pass
+        return group_counts
+
+    def stats_matieres(self):
+        mat_counts = {m: 0 for m in self.df['Matière'].unique()}
+        for s in self.weeks:
+            for _, row in self.df.iterrows():
+                for g in self.groups:
+                    if self.is_group_match(row[s], g):
+                        mat_counts[row['Matière']] += 1
+        return mat_counts
+
+    def stats_profs(self):
+        prof_counts = {p: 0 for p in self.df['Prof'].unique()}
+        for s in self.weeks:
+            for _, row in self.df.iterrows():
+                for g in self.groups:
+                    if self.is_group_match(row[s], g):
+                        prof_counts[row['Prof']] += 1
+        return prof_counts
+
+    def charge_hebdo(self):
+        return {
+            g: [self.compter_colles_groupe_semaine(g, str(w)) for w in _numeric_week_cols(self.df)]
+            for g in self.groups
+        }
+
+    # 🔴 Contraintes par groupe
+    def verifier_contraintes_groupe(self, g):
+        erreurs = []
+
+        # 1 - Pas plus de 2 colles par semaine
+        for s in self.weeks:
+            nb = self.compter_colles_groupe_semaine(g, s)
+            if nb > 2:
+                erreurs.append(
+                    f"Groupe {g} a {nb} colles en semaine {s} (max. 2 autorisées)."
+                )
+
+        # 2 - Pas deux colles le même jour
+        for s in self.weeks:
+            jours = {}
+            for _, row in self.df.iterrows():
+                if self.is_group_match(row[s], g):
+                    jour, heure = row["Jour"], row["Heure"]
+                    if jour not in jours:
+                        jours[jour] = []
+                    jours[jour].append(heure)
+            for j, heures in jours.items():
+                if len(heures) > 1:
+                    erreurs.append(
+                        f"Groupe {g} a {len(heures)} colles le même jour ({j}) en semaine {s}."
+                    )
+
+        # 3 - Vérifier la couverture par matière obligatoire (Maths/Physique/Anglais)
+        matieres_requises = ["Mathématiques", "Physique", "Anglais"]
+        for mat in matieres_requises:
+            count = 0
+            for s in self.weeks:
+                for _, row in self.df.iterrows():
+                    if row["Matière"] == mat and self.is_group_match(row[s], g):
+                        count += 1
+            if count == 0:
+                erreurs.append(f"Groupe {g} n'a aucune colle en {mat} sur la période.")
+
+        return erreurs
+
+    # 🔴 Contraintes globales
+    def verifier_contraintes_globales(self):
+        erreurs = []
+
+        # 1 - Pas deux colles au même créneau jour+heure+semaine (collision)
+        for s in self.weeks:
+            seen = set()
+            for _, row in self.df.iterrows():
+                val = row[s]
+                if not pd.isna(val) and str(val).strip() != "":
+                    key = (s, row["Jour"], row["Heure"])
+                    if key in seen:
+                        erreurs.append(
+                            f"Conflit détecté : plusieurs colles planifiées en {row['Jour']} {row['Heure']} (semaine {s})."
+                        )
+                    else:
+                        seen.add(key)
+
+        # 2 - Vérifier que tous les groupes assignés existent
+        for s in self.weeks:
+            for _, row in self.df.iterrows():
+                val = row[s]
+                if not pd.isna(val) and str(val).strip() != "":
+                    try:
+                        g = int(float(val))
+                        if g not in self.groups:
+                            erreurs.append(f"Groupe inconnu {val} utilisé en semaine {s}.")
+                    except:
+                        erreurs.append(f"Valeur invalide '{val}' en semaine {s}.")
+
+        return erreurs
+
+    def contraintes(self):
+        return {
+            "globales": self.verifier_contraintes_globales(),
+            "groupes": { str(g): self.verifier_contraintes_groupe(g) for g in self.groups }
+        }
+
+    def statistiques_globales(self):
+        total = 0
+        used = 0
+        for s in self.weeks:
+            if s not in self.df.columns:
+                continue
+            for _, row in self.df.iterrows():
+                val = row[s]
+                if not pd.isna(val) and str(val).strip() != "":
+                    total += 1
+                    try:
+                        if int(float(val)) in self.groups:
+                            used += 1
+                    except:
+                        pass
+        return {
+            "total_creneaux": total,
+            "creneaux_utilises": used,
+            "taux_utilisation": round(used/total*100, 1) if total > 0 else 0
+        }
+    def __init__(self, csv_content):
+        self.df = pd.read_csv(io.StringIO(csv_content), sep=';')
+        self.weeks = [str(w) for w in _numeric_week_cols(self.df)]
+        self.groups = extract_all_groups(self.df)
+        self.quinzaines = [(38,39),(40,41),(42,43),(44,45)]
+        self.mois = [(38,39,40,41),(42,43,44,45)]
+
+    def is_group_match(self, val, groupe):
+        if pd.isna(val): 
+            return False
+        try:
+            return int(float(val)) == int(groupe)
+        except:
+            return False
+
+    def compter_colles_groupe_semaine(self, g, semaine):
+        if semaine not in self.df.columns: 
+            return 0
         return sum(1 for _,row in self.df.iterrows() if self.is_group_match(row[semaine], g))
 
     def stats_groupes(self):
