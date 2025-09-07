@@ -7,8 +7,7 @@ import AnalysePage from './components/AnalysePage';
 import GroupeDetails from './components/GroupeDetails';
 import Extend24Button from './components/Extend24Button';
 import FormatToggle from './components/FormatToggle';
-import Navbar from 'react-bootstrap/Navbar';
-import Nav from 'react-bootstrap/Nav';
+import { Navbar, Nav } from "react-bootstrap";
 import './App.css';
 
 function App() {

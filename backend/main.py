@@ -247,6 +247,9 @@ def generate_planning_with_ortools(csv_content, mode="strict"):
         "maximize": "Planning généré en mode sauvegarde (maximisation des colles possibles)"
     }
 
+    # Post-traitement pour libérer les créneaux tardifs si possible
+    df = adjust_late_slots(df)
+    
     return df, mode_msg.get(mode, f"Planning généré en mode {mode}")
 
 
@@ -314,6 +317,95 @@ def extend_to_24_weeks(df8_weeks_csv: str, original_csv: str) -> pd.DataFrame:
 
     return df8
 
+def adjust_late_slots(df):
+    """
+    Corrige les cas où un prof a deux créneaux consécutifs (même jour)
+    avec un seul rempli. Si possible, on vide toujours le créneau le plus tardif
+    pour que le colleur termine plus tôt.
+    """
+    week_cols = [c for c in df.columns if str(c).isdigit()]
+
+    # Pour chaque prof et chaque jour de la semaine
+    for prof in df['Prof'].unique():
+        for day in df['Jour'].unique():
+            # Extraire les créneaux de ce prof à ce jour
+            subset = df[(df['Prof'] == prof) & (df['Jour'] == day)].copy()
+
+            # Trier dans l'ordre des heures (important pour détecter "avant / après")
+            subset = subset.sort_values('Heure')
+
+            row_indices = list(subset.index)
+
+            # Parcourir semaine par semaine
+            for w in week_cols:
+                prev_idx = None
+                for idx in row_indices:
+                    g = str(df.at[idx, w]) if not pd.isna(df.at[idx, w]) and str(df.at[idx, w]).strip() != "" else ""
+
+                    if prev_idx is not None:
+                        prev_g = str(df.at[prev_idx, w]) if not pd.isna(df.at[prev_idx, w]) and str(df.at[prev_idx, w]).strip() != "" else ""
+
+                        # Cas : groupe uniquement sur le créneau tardif
+                        if g != "" and prev_g == "":
+                            group_id = g
+
+                            # Vérifier qu'il n'y a pas déjà une colle pour ce groupe à l'heure précédente dans df
+                            jour_prev = df.at[prev_idx, 'Jour']
+                            heure_prev = df.at[prev_idx, 'Heure']
+
+                            conflict = False
+                            for _, row in df[df['Jour'] == jour_prev].iterrows():
+                                if str(row[w]).strip() == str(group_id) and row['Heure'] == heure_prev:
+                                    conflict = True
+                                    break
+
+                            # Si pas de conflit → décaler le groupe au créneau précédent
+                            if not conflict:
+                                df.at[prev_idx, w] = group_id
+                                df.at[idx, w] = ""
+
+                    prev_idx = idx
+    return df
+
+
+def export_excel_with_style(df):
+    out = io.BytesIO()
+    with pd.ExcelWriter(out, engine="xlsxwriter") as writer:
+        df.to_excel(writer, sheet_name="Planning", index=False)
+
+        workbook = writer.book
+        worksheet = writer.sheets["Planning"]
+
+        # Formats
+        header_format = workbook.add_format({
+            "bold": True, "align": "center", "valign": "vcenter",
+            "bg_color": "#DCE6F1", "border": 1
+        })
+        normal_format = workbook.add_format({"border": 1, "align": "center"})
+        grey_format   = workbook.add_format({"border": 1, "align": "center", "bg_color": "#E6E6E6"})
+
+        # Largeur colonnes auto
+        for col_num, value in enumerate(df.columns.values):
+            worksheet.set_column(col_num, col_num, 12)
+
+        # Masquer colonnes "Groupes possibles semaine paire/impaire"
+        worksheet.set_column("E:H", None, None, {"hidden": True})
+
+        # En-têtes stylées
+        for col_num, value in enumerate(df.columns.values):
+            worksheet.write(0, col_num, value, header_format)
+
+        # Contenu stylé
+        for row in range(1, len(df) + 1):
+            for col in range(len(df.columns)):
+                val = df.iloc[row - 1, col]
+                if pd.isna(val) or str(val).strip() == "":
+                    worksheet.write(row, col, "", grey_format)
+                else:
+                    worksheet.write(row, col, val, normal_format)
+
+    out.seek(0)
+    return out
 
 # -----------------------
 # PlanningAnalyzer (inchangé)
@@ -506,8 +598,7 @@ async def download_planning(format: str = Query("csv", enum=["csv", "excel"])):
     
     if format == "excel":
         out = io.BytesIO()
-        with pd.ExcelWriter(out, engine="xlsxwriter") as writer:
-            df.to_excel(writer, index=False, sheet_name="Planning")
+        out = export_excel_with_style(df)
         out.seek(0)
         return StreamingResponse(
             out,
