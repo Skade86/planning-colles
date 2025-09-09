@@ -84,9 +84,9 @@ def detect_group_families(df):
 def generate_planning_with_ortools(csv_content, mode="strict"):
     """
     Mode peut être:
-    - "strict": toutes contraintes strictes (== 1)
-    - "relaxed": contraintes de fréquence >= 1 au lieu de == 1
-    - "maximize": objectif de maximisation, contraintes minimales
+    - "strict": toutes contraintes strictes (== 1) + interdiction colles consécutives
+    - "relaxed": contraintes de fréquence >= 1 au lieu de == 1 + interdiction colles consécutives
+    - "maximize": objectif de maximisation, contraintes minimales + minimisation colles consécutives
     """
     df = pd.read_csv(io.StringIO(csv_content), sep=';')
     groups = extract_all_groups(df)
@@ -209,15 +209,41 @@ def generate_planning_with_ortools(csv_content, mode="strict"):
     for g in groups:
         for w in weeks:
             if mode == "maximize":
-                # En mode maximize, on accepte 0 colles par semaine
                 model.Add(sum(X.get((s, w, g), 0) for s in range(len(slots))) <= 4)
             else:
                 model.Add(sum(X.get((s, w, g), 0) for s in range(len(slots))) >= 1)
                 model.Add(sum(X.get((s, w, g), 0) for s in range(len(slots))) <= 4)
 
-    # Objectif en mode maximize
+    # ⚡ Contrainte colles consécutives
+    penalties = []
+    for g in groups:
+        for w in weeks:
+            for day in df['Jour'].unique():
+                slots_day = [(s, sl) for s, sl in enumerate(slots) if sl['day'] == day]
+                slots_day.sort(key=lambda x: x[1]['hour'])
+
+                for i in range(len(slots_day) - 1):
+                    s1, sl1 = slots_day[i]
+                    s2, sl2 = slots_day[i+1]
+
+                    if sl1['hour'].split('-')[1] == sl2['hour'].split('-')[0]:
+                        if mode in ["strict", "relaxed"]:
+                            # 🔴 Contrainte DURE : interdiction totale
+                            model.Add(X.get((s1, w, g), 0) + X.get((s2, w, g), 0) <= 1)
+                        else:  # mode == "maximize"
+                            # 🟡 Contrainte DOUCE : pénalité à minimiser
+                            b = model.NewBoolVar(f"cons_{g}_{w}_{s1}_{s2}")
+                            model.Add(
+                                X.get((s1, w, g), 0) + X.get((s2, w, g), 0) == 2
+                            ).OnlyEnforceIf(b)
+                            model.Add(
+                                X.get((s1, w, g), 0) + X.get((s2, w, g), 0) != 2
+                            ).OnlyEnforceIf(b.Not())
+                            penalties.append(b)
+
+    # Objectif
     if mode == "maximize":
-        model.Maximize(sum(X.values()))
+        model.Maximize(sum(X.values()) - sum(penalties))
 
     # Solve
     solver = cp_model.CpSolver()
@@ -242,16 +268,14 @@ def generate_planning_with_ortools(csv_content, mode="strict"):
         df[str(w)] = col
 
     mode_msg = {
-        "strict": "Planning généré avec toutes les contraintes strictes",
-        "relaxed": "Planning généré avec contraintes relâchées (>= 1 au lieu de == 1)",
-        "maximize": "Planning généré en mode sauvegarde (maximisation des colles possibles)"
+        "strict": "Planning généré avec toutes les contraintes strictes + interdiction colles consécutives",
+        "relaxed": "Planning généré avec contraintes relâchées + interdiction colles consécutives",
+        "maximize": "Planning généré en mode sauvegarde (maximisation des colles et minimisation des colles consécutives)"
     }
 
-    # Post-traitement pour libérer les créneaux tardifs si possible
     df = adjust_late_slots(df)
     
     return df, mode_msg.get(mode, f"Planning généré en mode {mode}")
-
 
 # -----------------------
 # Extension à 24 semaines (rotation par familles détectées)
@@ -815,8 +839,10 @@ async def extend_planning(format: str = Query("csv", enum=["csv", "excel"])):
         
         if format == "excel":
             out = io.BytesIO()
-            with pd.ExcelWriter(out, engine="xlsxwriter") as writer:
-                df24.to_excel(writer, index=False, sheet_name="Planning")
+            out = export_excel_with_style(df24)
+            out.seek(0)
+            #with pd.ExcelWriter(out, engine="xlsxwriter") as writer:
+            #    df24.to_excel(writer, index=False, sheet_name="Planning")
             out.seek(0)
             return StreamingResponse(
                 out,
