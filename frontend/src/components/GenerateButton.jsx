@@ -17,6 +17,7 @@ function GenerateButton({ setPlanning, setStatus }) {
         type: 'error',
         text: "Erreur lors de la génération. Vérifiez que le backend tourne et qu'un fichier a été uploadé."
       });
+      console.log(error.data);
     }
   };
 

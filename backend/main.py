@@ -77,24 +77,84 @@ def detect_group_families(df):
         families = [extract_all_groups(df)]
     return families
 
+# -----------------------
+# Utils semaines dynamiques
+# -----------------------
+def extract_week_columns(df):
+    """
+    Retourne les colonnes semaines dans l'ordre du CSV.
+    Ex: ["38","39","41","42",...], et leur version int.
+    On ne trie pas : on respecte l'ordre fourni dans le fichier.
+    """
+    weeks_str = []
+    for c in df.columns:
+        if isinstance(c, str) and c.strip().isdigit():
+            weeks_str.append(c.strip())
+    weeks_int = [int(w) for w in weeks_str]
+    return weeks_str, weeks_int
+
+def make_windows_non_overlapping(weeks_list, size):
+    """
+    Découpe la liste des semaines en fenêtres non chevauchantes de 'size'.
+    Ignore la dernière fenêtre si incomplète (ex: reste 1 semaine).
+    Exemple: size=2 -> quinzaines, size=4 -> "mois" pédagogiques.
+    """
+    windows = []
+    for i in range(0, len(weeks_list), size):
+        chunk = weeks_list[i:i+size]
+        if len(chunk) == size:
+            windows.append(tuple(chunk))
+    return windows
+
+def parse_hhmm_range_to_minutes(hhmm_range):
+    # "17h-18h" -> (1020, 1080)
+    deb, fin = [p.strip() for p in str(hhmm_range).split('-')]
+    def h2m(p):
+        parts = str(p).split('h')
+        h = int(parts[0]) if parts[0] else 0
+        m = int(parts[1]) if len(parts) > 1 and parts[1] else 0
+        return h * 60 + m
+    return h2m(deb), h2m(fin)
 
 # -----------------------
-# Génération OR-Tools ROBUSTE (3 niveaux)
+# Génération OR-Tools avec semaines dynamiques
 # -----------------------
 def generate_planning_with_ortools(csv_content, mode="strict"):
     """
-    Mode peut être:
-    - "strict": toutes contraintes strictes (== 1) + interdiction colles consécutives
-    - "relaxed": contraintes de fréquence >= 1 au lieu de == 1 + interdiction colles consécutives
-    - "maximize": objectif de maximisation, contraintes minimales + minimisation colles consécutives
+    Mode:
+    - "strict": contraintes strictes (== 1) + interdit colles consécutives
+    - "relaxed": fréquence >= 1 + interdit colles consécutives
+    - "maximize": objectif de maximisation + minimise colles consécutives (pénalité douce)
     """
     df = pd.read_csv(io.StringIO(csv_content), sep=';')
+
+    # Normalisation pour fiabiliser les contraintes
+    df['Jour'] = df['Jour'].astype(str).str.strip()
+    df['Heure'] = (
+        df['Heure'].astype(str)
+        .str.replace(' ', '', regex=False)  # "18h - 19h" -> "18h-19h"
+        .str.strip()
+    )
+
     groups = extract_all_groups(df)
     if not groups:
         return None, "Aucun groupe détecté dans le CSV"
 
-    print(f"[DEBUG] Mode: {mode}, Groupes: {groups}")
+    # Semaines dynamiques depuis le CSV (ordre respecté, non trié)
+    weeks_str, weeks_int = extract_week_columns(df)
+    if not weeks_str:
+        return None, "Aucune colonne de semaine détectée dans le CSV"
 
+    print(f"[DEBUG] Mode: {mode}, Groupes: {groups}, Weeks: {weeks_str}")
+
+    # Fenêtres dynamiques basées sur la liste
+    # Quinzaines: fenêtres non chevauchantes de 2 semaines (selon l'ordre du CSV)
+    quinz = make_windows_non_overlapping(weeks_str, 2)
+    # "Mois" pédagogiques: fenêtres non chevauchantes de 4 semaines
+    mois = make_windows_non_overlapping(weeks_str, 4)
+    eight_week_blocks = make_windows_non_overlapping(weeks_str, 8)
+
+    # Création des slots
     slots = []
     for _, row in df.iterrows():
         slots.append(dict(
@@ -104,177 +164,192 @@ def generate_planning_with_ortools(csv_content, mode="strict"):
             hour=row['Heure'],
             even=parse_groups(row['Groupes possibles semaine paire']),
             odd=parse_groups(row['Groupes possibles semaine impaire']),
-            works_even=row['Travaille les semaines paires'] == 'Oui',
-            works_odd=row['Travaille les semaines impaires'] == 'Oui'
+            works_even=(str(row['Travaille les semaines paires']).strip() == 'Oui'),
+            works_odd=(str(row['Travaille les semaines impaires']).strip() == 'Oui')
         ))
 
-    weeks = list(range(38, 46))
     model = cp_model.CpModel()
     X = {}
 
-    # Variables
+    # Variables: respect pair/impair + autorisations par slot
     for s, slot in enumerate(slots):
-        for w in weeks:
+        for w_str, w_int in zip(weeks_str, weeks_int):
             for g in groups:
-                if (w % 2 == 0 and (g not in slot['even'] or not slot['works_even'])) or \
-                   (w % 2 == 1 and (g not in slot['odd'] or not slot['works_odd'])):
+                if (w_int % 2 == 0 and (g not in slot['even'] or not slot['works_even'])) or \
+                   (w_int % 2 == 1 and (g not in slot['odd'] or not slot['works_odd'])):
                     continue
-                X[s, w, g] = model.NewBoolVar(f"x_{s}_{w}_{g}")
+                X[s, w_str, g] = model.NewBoolVar(f"x_{s}_{w_str}_{g}")
 
-    # Contrainte 1: pas deux groupes dans le même slot
+    # 1) Un seul groupe par slot/semaine
     for s in range(len(slots)):
-        for w in weeks:
-            model.Add(sum(X.get((s, w, g), 0) for g in groups) <= 1)
+        for w_str in weeks_str:
+            model.Add(sum(X.get((s, w_str, g), 0) for g in groups) <= 1)
 
-    # Contrainte 1bis: prof unique par créneau (sauf en mode maximize)
+    # 1bis) Prof unique par créneau (hors maximize)
     if mode != "maximize":
-        for w in weeks:
+        for w_str in weeks_str:
             for prof in df['Prof'].unique():
                 for day in df['Jour'].unique():
                     for hour in df['Heure'].unique():
                         model.Add(
-                            sum(X.get((s, w, g), 0)
+                            sum(
+                                X.get((s, w_str, g), 0)
                                 for s, sl in enumerate(slots)
                                 if sl['prof'] == prof and sl['day'] == day and sl['hour'] == hour
-                                for g in groups) <= 1
+                                for g in groups
+                            ) <= 1
                         )
 
-    # Contrainte 2: fréquences (strict vs relaxed)
-    quinz = [(38, 39), (40, 41), (42, 43), (44, 45)]
-    mois  = [(38, 39, 40, 41), (42, 43, 44, 45)]
-
+    # 2) Fréquences par matière (selon mode) sur fenêtres dynamiques
     if mode != "maximize":
         for g in groups:
-            # Mathématiques, Physique, Anglais: 1 par quinzaine
+            # 1 par quinzaine pour Maths/Physique/Anglais
             for mat in ['Mathématiques', 'Physique', 'Anglais']:
                 for q in quinz:
-                    constraint_sum = sum(X.get((s, w, g), 0)
-                                       for s, sl in enumerate(slots) if sl['mat'] == mat
-                                       for w in q)
+                    constraint_sum = sum(
+                        X.get((s, w, g), 0)
+                        for s, sl in enumerate(slots) if sl['mat'] == mat
+                        for w in q
+                    )
                     if mode == "strict":
                         model.Add(constraint_sum == 1)
-                    else:  # relaxed
+                    else:
                         model.Add(constraint_sum >= 1)
 
-            # Chimie, S.I: 1 par mois
+            # 1 par "mois" (4 semaines)
             for mat in ['Chimie', 'S.I']:
                 for m in mois:
-                    constraint_sum = sum(X.get((s, w, g), 0)
-                                       for s, sl in enumerate(slots) if sl['mat'] == mat
-                                       for w in m)
+                    constraint_sum = sum(
+                        X.get((s, w, g), 0)
+                        for s, sl in enumerate(slots) if sl['mat'] == mat
+                        for w in m
+                    )
                     if mode == "strict":
                         model.Add(constraint_sum == 1)
-                    else:  # relaxed
+                    else:
                         model.Add(constraint_sum >= 1)
 
-            # Français: 1 sur toute la période
-            constraint_sum = sum(X.get((s, w, g), 0)
-                               for s, sl in enumerate(slots) if sl['mat'] == 'Français'
-                               for w in weeks)
-            if mode == "strict":
-                model.Add(constraint_sum == 1)
-            else:  # relaxed
-                model.Add(constraint_sum >= 1)
+            # Français: 1 sur toute la période (toutes semaines détectées)
+            # Français: 1 par tranche de 8 semaines
+            for g in groups:
+                for block in eight_week_blocks:
+                    constraint_sum = sum(
+                        X.get((s, w, g), 0)
+                        for s, sl in enumerate(slots) if sl['mat'] == 'Français'
+                        for w in block
+                    )
+                    if mode == "strict":
+                        model.Add(constraint_sum == 1)
+                    else:
+                        model.Add(constraint_sum >= 1)
 
-    # Contrainte 3: rotation profs (sauf en mode maximize)
+    # 3) Rotation profs sur 2 quinzaines adjacentes (hors maximize)
     if mode != "maximize":
-        adj_quinz = [(0, 1), (1, 2), (2, 3)]
-        for g in groups:
-            for mat in ['Mathématiques', 'Physique', 'Anglais']:
-                for p in set(sl['prof'] for sl in slots if sl['mat'] == mat):
-                    for q1, q2 in adj_quinz:
-                        Q1, Q2 = quinz[q1], quinz[q2]
-                        model.Add(
-                            sum(X.get((s, w, g), 0)
-                                for s, sl in enumerate(slots)
-                                if sl['mat'] == mat and sl['prof'] == p
-                                for w in Q1) +
-                            sum(X.get((s, w, g), 0)
-                                for s, sl in enumerate(slots)
-                                if sl['mat'] == mat and sl['prof'] == p
-                                for w in Q2)
-                            <= 1)
+        if len(quinz) >= 2:
+            for g in groups:
+                for mat in ['Mathématiques', 'Physique', 'Anglais']:
+                    profs_mat = sorted({sl['prof'] for sl in slots if sl['mat'] == mat})
+                    for p in profs_mat:
+                        for i in range(len(quinz) - 1):
+                            Q1, Q2 = quinz[i], quinz[i + 1]
+                            model.Add(
+                                sum(
+                                    X.get((s, w, g), 0)
+                                    for s, sl in enumerate(slots) if sl['mat'] == mat and sl['prof'] == p
+                                    for w in Q1
+                                )
+                                +
+                                sum(
+                                    X.get((s, w, g), 0)
+                                    for s, sl in enumerate(slots) if sl['mat'] == mat and sl['prof'] == p
+                                    for w in Q2
+                                )
+                                <= 1
+                            )
 
-    # Contrainte 4: pas deux colles même jour+heure pour un groupe
+    # 4) Pas deux colles même jour+heure pour un groupe
     for g in groups:
-        for w in weeks:
+        for w_str in weeks_str:
             for day in df['Jour'].unique():
                 for hour in df['Heure'].unique():
                     model.Add(
-                        sum(X.get((s, w, g), 0)
+                        sum(
+                            X.get((s, w_str, g), 0)
                             for s, sl in enumerate(slots)
-                            if sl['day'] == day and sl['hour'] == hour) <= 1)
+                            if sl['day'] == day and sl['hour'] == hour
+                        ) <= 1
+                    )
 
-    # Contrainte 5: charge hebdo
+    # 5) Charge hebdo (bornes)
     for g in groups:
-        for w in weeks:
+        for w_str in weeks_str:
             if mode == "maximize":
-                model.Add(sum(X.get((s, w, g), 0) for s in range(len(slots))) <= 4)
+                model.Add(sum(X.get((s, w_str, g), 0) for s in range(len(slots))) <= 4)
             else:
-                model.Add(sum(X.get((s, w, g), 0) for s in range(len(slots))) >= 1)
-                model.Add(sum(X.get((s, w, g), 0) for s in range(len(slots))) <= 4)
+                model.Add(sum(X.get((s, w_str, g), 0) for s in range(len(slots))) >= 1)
+                model.Add(sum(X.get((s, w_str, g), 0) for s in range(len(slots))) <= 4)
 
-    # ⚡ Contrainte colles consécutives
-    penalties = []
+    # 6) Interdire systématiquement les colles consécutives (hard constraint)
     for g in groups:
-        for w in weeks:
+        for w_str in weeks_str:
             for day in df['Jour'].unique():
+                # Créneaux de ce jour (triés par heure de début)
                 slots_day = [(s, sl) for s, sl in enumerate(slots) if sl['day'] == day]
-                slots_day.sort(key=lambda x: x[1]['hour'])
+                slots_day.sort(key=lambda x: parse_hhmm_range_to_minutes(x[1]['hour'])[0])
 
                 for i in range(len(slots_day) - 1):
                     s1, sl1 = slots_day[i]
-                    s2, sl2 = slots_day[i+1]
+                    s2, sl2 = slots_day[i + 1]
+                    _, end1 = parse_hhmm_range_to_minutes(sl1['hour'])
+                    start2, _ = parse_hhmm_range_to_minutes(sl2['hour'])
 
-                    if sl1['hour'].split('-')[1] == sl2['hour'].split('-')[0]:
-                        if mode in ["strict", "relaxed"]:
-                            # 🔴 Contrainte DURE : interdiction totale
-                            model.Add(X.get((s1, w, g), 0) + X.get((s2, w, g), 0) <= 1)
-                        else:  # mode == "maximize"
-                            # 🟡 Contrainte DOUCE : pénalité à minimiser
-                            b = model.NewBoolVar(f"cons_{g}_{w}_{s1}_{s2}")
-                            model.Add(
-                                X.get((s1, w, g), 0) + X.get((s2, w, g), 0) == 2
-                            ).OnlyEnforceIf(b)
-                            model.Add(
-                                X.get((s1, w, g), 0) + X.get((s2, w, g), 0) != 2
-                            ).OnlyEnforceIf(b.Not())
-                            penalties.append(b)
-
+                    if end1 == start2:
+                        # HARD: jamais 2 colles back-to-back pour un groupe
+                        model.Add(X.get((s1, w_str, g), 0) + X.get((s2, w_str, g), 0) <= 1)
+    
+        # (Hard) Au plus 1 colle par jour pour chaque groupe et semaine
+    for g in groups:
+        for w_str in weeks_str:
+            for day in df['Jour'].unique():
+                model.Add(
+                    sum(
+                        X.get((s, w_str, g), 0)
+                        for s, sl in enumerate(slots)
+                        if sl['day'] == day
+                    ) <= 1
+                )
     # Objectif
     if mode == "maximize":
-        model.Maximize(sum(X.values()) - sum(penalties))
+        model.Maximize(sum(X.values()))
 
     # Solve
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = 30
     status = solver.Solve(model)
-
     print(f"[DEBUG] Status: {status}, Mode: {mode}")
 
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return None, f"Aucune solution trouvée en mode {mode}"
 
-    # Inject solution dans df
-    for w in weeks:
+    # Injection: (ré)écrit uniquement les colonnes semaines détectées
+    for w_str in weeks_str:
         col = []
         for s in range(len(slots)):
             g_found = ''
             for g in groups:
-                if (s, w, g) in X and solver.Value(X[s, w, g]) == 1:
+                if (s, w_str, g) in X and solver.Value(X[s, w_str, g]) == 1:
                     g_found = str(g)
                     break
             col.append(g_found)
-        df[str(w)] = col
+        df[w_str] = col
 
     mode_msg = {
-        "strict": "Planning généré avec toutes les contraintes strictes + interdiction colles consécutives",
-        "relaxed": "Planning généré avec contraintes relâchées + interdiction colles consécutives",
-        "maximize": "Planning généré en mode sauvegarde (maximisation des colles et minimisation des colles consécutives)"
+        "strict": "Planning généré (semaines dynamiques, consécutives interdites)",
+        "relaxed": "Planning généré (semaines dynamiques, contraintes relâchées, consécutives interdites)",
+        "maximize": "Planning généré (semaines dynamiques, max colles & min colles consécutives)"
     }
 
-    df = adjust_late_slots(df)
-    
+    #df = adjust_late_slots(df)
     return df, mode_msg.get(mode, f"Planning généré en mode {mode}")
 
 # -----------------------
@@ -331,7 +406,7 @@ def extend_to_24_weeks(df8_weeks_csv: str, original_csv: str) -> pd.DataFrame:
 
             df8[new_week_str] = col_rot
             
-    # ⚡ Corriger les numéros de groupes : forcer en entiers ou vide
+    # Corriger les numéros de groupes : forcer en entiers ou vide
     for col in df8.columns:
         if str(col).isdigit():
             df8[col] = (
@@ -346,6 +421,8 @@ def adjust_late_slots(df):
     Corrige les cas où un prof a deux créneaux consécutifs (même jour)
     avec un seul rempli. Si possible, on vide toujours le créneau le plus tardif
     pour que le colleur termine plus tôt.
+    
+    CORRECTION: Vérifie maintenant les contraintes paire/impaire avant déplacement.
     """
     week_cols = [c for c in df.columns if str(c).isdigit()]
 
@@ -371,7 +448,10 @@ def adjust_late_slots(df):
 
                         # Cas : groupe uniquement sur le créneau tardif
                         if g != "" and prev_g == "":
-                            group_id = g
+                            try:
+                                group_id = int(g)  # Convertir en int pour les vérifications
+                            except ValueError:
+                                continue  # Ignorer si pas un nombre valide
 
                             # Vérifier qu'il n'y a pas déjà une colle pour ce groupe à l'heure précédente dans df
                             jour_prev = df.at[prev_idx, 'Jour']
@@ -383,14 +463,33 @@ def adjust_late_slots(df):
                                     conflict = True
                                     break
 
+                            # ✅ NOUVELLE VÉRIFICATION : contraintes paire/impaire
+                            if not conflict:
+                                try:
+                                    week_num = int(w)
+                                    prev_row = df.iloc[prev_idx]
+                                    
+                                    if week_num % 2 == 0:  # Semaine paire
+                                        allowed_groups = parse_groups(prev_row['Groupes possibles semaine paire'])
+                                    else:  # Semaine impaire
+                                        allowed_groups = parse_groups(prev_row['Groupes possibles semaine impaire'])
+                                    
+                                    # Vérifier si le groupe est autorisé dans le créneau précédent
+                                    if group_id not in allowed_groups:
+                                        conflict = True  # Empêcher le déplacement
+                                        print(f"[DEBUG] Déplacement bloqué: Groupe {group_id} non autorisé en semaine {week_num} ({'paire' if week_num % 2 == 0 else 'impaire'}) pour {prev_row['Prof']} {prev_row['Jour']} {prev_row['Heure']}")
+                                
+                                except (ValueError, KeyError):
+                                    conflict = True  # En cas d'erreur, ne pas déplacer
+
                             # Si pas de conflit → décaler le groupe au créneau précédent
                             if not conflict:
                                 df.at[prev_idx, w] = group_id
                                 df.at[idx, w] = ""
+                                print(f"[DEBUG] Déplacement OK: Groupe {group_id} déplacé vers {prev_row['Prof']} {prev_row['Jour']} {prev_row['Heure']} semaine {w}")
 
                     prev_idx = idx
     return df
-
 
 def export_excel_with_style(df):
     out = io.BytesIO()
@@ -432,249 +531,242 @@ def export_excel_with_style(df):
     return out
 
 # -----------------------
-# PlanningAnalyzer (inchangé)
+# PlanningAnalyzer avec colles consécutives
 # -----------------------
+
 class PlanningAnalyzer:
     def __init__(self, csv_content):
         self.df = pd.read_csv(io.StringIO(csv_content), sep=';')
-        self.weeks = [str(w) for w in _numeric_week_cols(self.df)]
-        self.groups = extract_all_groups(self.df)
-        self.quinzaines = [(38,39),(40,41),(42,43),(44,45)]
-        self.mois = [(38,39,40,41),(42,43,44,45)]
 
-    def is_group_match(self, val, groupe):
-        if pd.isna(val): 
-            return False
-        try:
-            return int(float(val)) == int(groupe)
-        except:
-            return False
+        # Semaines dynamiques (colonnes numériques)
+        self.weeks = [int(c) for c in self.df.columns if str(c).isdigit()]
+        self.weeks.sort()
+        self.groups = list(range(1, 16))  # 15 groupes
 
-    def compter_colles_groupe_semaine(self, g, semaine):
-        if semaine not in self.df.columns: 
-            return 0
-        return sum(1 for _, row in self.df.iterrows() if self.is_group_match(row[semaine], g))
+        # Fenêtres dynamiques NON CHEVAUCHANTES (comme OR-Tools)
+        def make_windows_non_overlapping(weeks, size):
+            return [tuple(weeks[i:i+size]) for i in range(0, len(weeks), size)
+                    if len(weeks[i:i+size]) == size]
 
-    def stats_groupes(self):
-        group_counts = {g: 0 for g in self.groups}
-        for s in self.weeks:
+        self.groups_2 = make_windows_non_overlapping(self.weeks, 2)
+        self.groups_4 = make_windows_non_overlapping(self.weeks, 4)
+        self.groups_8 = make_windows_non_overlapping(self.weeks, 8)
+
+    # -------------------- CONTRAINTES GLOBALES --------------------
+    def verifier_contraintes_globales(self):
+        erreurs = []
+        for week in self.weeks:
+            week_str = str(week)
+            creneaux = {}
+
             for _, row in self.df.iterrows():
+                val = row.get(week_str, "")
                 try:
-                    v = int(float(row[s])) if not pd.isna(row[s]) else None
-                    if v in group_counts:
-                        group_counts[v] += 1
-                except:
-                    pass
-        return group_counts
+                    g = int(val)
+                except (ValueError, TypeError):
+                    continue
+
+                prof = row.get("Prof", "Inconnu")
+                jour = row.get("Jour", "Inconnu")
+                heure = row.get("Heure", "Inconnu")
+                matiere = row.get("Matière", "Inconnue")
+                key = (jour, heure)
+                creneaux.setdefault(key, []).append((prof, g, matiere))
+
+            for (jour, heure), entries in creneaux.items():
+                # Prof : pas 2 groupes en parallèle
+                prof_to_groups = {}
+                for prof, group, _ in entries:
+                    prof_to_groups.setdefault(prof, []).append(group)
+                for prof, groups in prof_to_groups.items():
+                    if len(groups) > 1:
+                        erreurs.append(f"Semaine {week}: PROF {prof} → groupes {sorted(groups)} ({jour} {heure})")
+
+                # Groupe : pas 2 colles différentes en parallèle
+                group_to_matieres = {}
+                for prof, group, mat in entries:
+                    group_to_matieres.setdefault(group, []).append((mat, prof))
+                for group, mats in group_to_matieres.items():
+                    if len(mats) > 1:
+                        erreurs.append(f"Semaine {week}: GROUPE {group} → colles {mats} en parallèle ({jour} {heure})")
+
+        return erreurs
+
+    # -------------------- CONTRAINTES PAR GROUPE --------------------
+    def verifier_contraintes_groupe(self, groupe):
+        erreurs = []
+        group_weeks = {w: [] for w in self.weeks}
+
+        # Construire dict colles pour ce groupe
+        for week in self.weeks:
+            week_str = str(week)
+            for _, row in self.df.iterrows():
+                val = row.get(week_str, "")
+                try:
+                    g = int(val)
+                except (ValueError, TypeError):
+                    continue
+                if g == groupe:
+                    group_weeks[week].append([row["Matière"], row["Prof"], row["Jour"], row["Heure"]])
+
+        # Maths / Physique / Anglais → 1 par quinzaine
+        for matiere in ["Mathématiques", "Physique", "Anglais"]:
+            for quin in self.groups_2:
+                count = sum(
+                    sum(1 for colle in group_weeks.get(w, []) if colle[0] == matiere)
+                    for w in quin
+                )
+                if count != 1:
+                    erreurs.append(f"{matiere} - Quinzaine {quin}: {count} colles (attendu: 1)")
+
+        # Chimie / SI → 1 par 4 semaines
+        for matiere in ["Chimie", "S.I"]:
+            for bloc in self.groups_4:
+                count = sum(
+                    sum(1 for colle in group_weeks.get(w, []) if colle[0] == matiere)
+                    for w in bloc
+                )
+                if count != 1:
+                    erreurs.append(f"{matiere} - Bloc {bloc}: {count} colles (attendu: 1)")
+
+        # Français → 1 par 8 semaines
+        for bloc in self.groups_8:
+            count = sum(
+                sum(1 for colle in group_weeks.get(w, []) if colle[0] == "Français")
+                for w in bloc
+            )
+            if count != 1:
+                erreurs.append(f"Français - Bloc {bloc}: {count} colles (attendu: 1)")
+
+        # Pas plus d'1 colle par jour
+        for week in self.weeks:
+            by_day = {}
+            for mat, prof, jour, heure in group_weeks.get(week, []):
+                by_day.setdefault(jour, []).append((mat, prof, heure))
+            for jour, colles in by_day.items():
+                if len(colles) > 1:
+                    erreurs.append(
+                        f"Groupe {groupe}, Semaine {week}, Jour {jour}: {len(colles)} colles (max 1 autorisée)"
+                    )
+
+        return erreurs
+
+    # -------------------- CONSÉCUTIVES --------------------
+    def _parse_heure_debut(self, heure_str):
+        try:
+            return int(str(heure_str).split("h-")[0])
+        except Exception:
+            return -1
+
+    def colles_consecutives_par_groupe(self):
+        result = {g: [] for g in self.groups}
+        for g in self.groups:
+            for week in self.weeks:
+                week_str = str(week)
+                colles = []
+                for _, row in self.df.iterrows():
+                    val = row.get(week_str, "")
+                    try:
+                        v = int(val)
+                    except (ValueError, TypeError):
+                        continue
+                    if v == g:
+                        colles.append((row["Jour"], row["Heure"], row["Matière"], row["Prof"]))
+
+                # Groupement par jour
+                by_day = {}
+                for jour, heure, mat, prof in colles:
+                    by_day.setdefault(jour, []).append((self._parse_heure_debut(heure), heure, mat, prof))
+
+                for jour, items in by_day.items():
+                    items.sort(key=lambda x: x[0])
+                    for i in range(len(items) - 1):
+                        if items[i+1][0] - items[i][0] == 1:
+                            result[g].append(
+                                f"Groupe {g}, Semaine {week}, {jour}: colles consécutives {items[i][1]} ({items[i][2]}-{items[i][3]}) puis {items[i+1][1]} ({items[i+1][2]}-{items[i+1][3]})"
+                            )
+        return result
+
+    def verifier_colles_consecutives(self):
+        messages = []
+        data = self.colles_consecutives_par_groupe()
+        for g, lst in data.items():
+            messages.extend(lst)
+        return messages
+
+    # -------------------- STATS --------------------
+    def stats_groupes(self):
+        counts = {g: 0 for g in self.groups}
+        for w in [str(w) for w in self.weeks]:
+            for v in self.df[w]:
+                try:
+                    g = int(v)
+                except (ValueError, TypeError):
+                    continue
+                if g in counts:
+                    counts[g] += 1
+        return counts
 
     def stats_matieres(self):
-        mat_counts = {m: 0 for m in self.df['Matière'].unique()}
-        for s in self.weeks:
+        mat_counts = {}
+        for w in [str(w) for w in self.weeks]:
             for _, row in self.df.iterrows():
-                for g in self.groups:
-                    if self.is_group_match(row[s], g):
-                        mat_counts[row['Matière']] += 1
+                try:
+                    int(row[w])
+                except (ValueError, TypeError):
+                    continue
+                mat = row["Matière"]
+                mat_counts[mat] = mat_counts.get(mat, 0) + 1
         return mat_counts
 
     def stats_profs(self):
-        prof_counts = {p: 0 for p in self.df['Prof'].unique()}
-        for s in self.weeks:
+        prof_counts = {}
+        for w in [str(w) for w in self.weeks]:
             for _, row in self.df.iterrows():
-                for g in self.groups:
-                    if self.is_group_match(row[s], g):
-                        prof_counts[row['Prof']] += 1
+                try:
+                    int(row[w])
+                except (ValueError, TypeError):
+                    continue
+                prof = row["Prof"]
+                prof_counts[prof] = prof_counts.get(prof, 0) + 1
         return prof_counts
 
     def charge_hebdo(self):
-        return {
-            g: [self.compter_colles_groupe_semaine(g, str(w)) for w in _numeric_week_cols(self.df)]
-            for g in self.groups
-        }
-
-    # 🔴 Contraintes par groupe
-    def verifier_contraintes_groupe(self, g):
-        erreurs = []
-
-        # 1 - Pas plus de 2 colles par semaine
-        for s in self.weeks:
-            nb = self.compter_colles_groupe_semaine(g, s)
-            if nb > 2:
-                erreurs.append(
-                    f"Groupe {g} a {nb} colles en semaine {s} (max. 2 autorisées)."
-                )
-
-        # 2 - Pas deux colles le même jour
-        for s in self.weeks:
-            jours = {}
+        charge = {g: [] for g in self.groups}
+        for w in [str(w) for w in self.weeks]:
+            weekly_counts = {g: 0 for g in self.groups}
             for _, row in self.df.iterrows():
-                if self.is_group_match(row[s], g):
-                    jour, heure = row["Jour"], row["Heure"]
-                    if jour not in jours:
-                        jours[jour] = []
-                    jours[jour].append(heure)
-            for j, heures in jours.items():
-                if len(heures) > 1:
-                    erreurs.append(
-                        f"Groupe {g} a {len(heures)} colles le même jour ({j}) en semaine {s}."
-                    )
+                try:
+                    g = int(row[w])
+                except (ValueError, TypeError):
+                    continue
+                if g in weekly_counts:
+                    weekly_counts[g] += 1
+            for g in self.groups:
+                charge[g].append(weekly_counts[g])
+        return charge
 
-        # 3 - Vérifier la couverture par matière obligatoire (Maths/Physique/Anglais)
-        matieres_requises = ["Mathématiques", "Physique", "Anglais"]
-        for mat in matieres_requises:
-            count = 0
-            for s in self.weeks:
-                for _, row in self.df.iterrows():
-                    if row["Matière"] == mat and self.is_group_match(row[s], g):
-                        count += 1
-            if count == 0:
-                erreurs.append(f"Groupe {g} n'a aucune colle en {mat} sur la période.")
+    def statistiques_globales(self):
+        total_slots = len(self.df) * len(self.weeks)
+        used = 0
+        for w in [str(w) for w in self.weeks]:
+            for v in self.df[w]:
+                try:
+                    int(v)
+                    used += 1
+                except (ValueError, TypeError):
+                    continue
+        taux = round((used/total_slots)*100, 1) if total_slots else 0
+        return {"total_creneaux": total_slots, "creneaux_utilises": used, "taux_utilisation": taux}
 
-        return erreurs
-
-    # 🔴 Contraintes globales
-    def verifier_contraintes_globales(self):
-        erreurs = []
-
-        # 1 - Pas deux colles au même créneau jour+heure+semaine (collision)
-        for s in self.weeks:
-            seen = set()
-            for _, row in self.df.iterrows():
-                val = row[s]
-                if not pd.isna(val) and str(val).strip() != "":
-                    key = (s, row["Jour"], row["Heure"])
-                    if key in seen:
-                        erreurs.append(
-                            f"Conflit détecté : plusieurs colles planifiées en {row['Jour']} {row['Heure']} (semaine {s})."
-                        )
-                    else:
-                        seen.add(key)
-
-        # 2 - Vérifier que tous les groupes assignés existent
-        for s in self.weeks:
-            for _, row in self.df.iterrows():
-                val = row[s]
-                if not pd.isna(val) and str(val).strip() != "":
-                    try:
-                        g = int(float(val))
-                        if g not in self.groups:
-                            erreurs.append(f"Groupe inconnu {val} utilisé en semaine {s}.")
-                    except:
-                        erreurs.append(f"Valeur invalide '{val}' en semaine {s}.")
-
-        return erreurs
-
+    # -------------------- WRAPPER --------------------
     def contraintes(self):
         return {
             "globales": self.verifier_contraintes_globales(),
-            "groupes": { str(g): self.verifier_contraintes_groupe(g) for g in self.groups }
+            "groupes": {g: self.verifier_contraintes_groupe(g) for g in self.groups},
+            "consecutives": self.verifier_colles_consecutives()
         }
 
-    def statistiques_globales(self):
-        total = 0
-        used = 0
-        for s in self.weeks:
-            if s not in self.df.columns:
-                continue
-            for _, row in self.df.iterrows():
-                val = row[s]
-                if not pd.isna(val) and str(val).strip() != "":
-                    total += 1
-                    try:
-                        if int(float(val)) in self.groups:
-                            used += 1
-                    except:
-                        pass
-        return {
-            "total_creneaux": total,
-            "creneaux_utilises": used,
-            "taux_utilisation": round(used/total*100, 1) if total > 0 else 0
-        }
-    def __init__(self, csv_content):
-        self.df = pd.read_csv(io.StringIO(csv_content), sep=';')
-        self.weeks = [str(w) for w in _numeric_week_cols(self.df)]
-        self.groups = extract_all_groups(self.df)
-        self.quinzaines = [(38,39),(40,41),(42,43),(44,45)]
-        self.mois = [(38,39,40,41),(42,43,44,45)]
-
-    def is_group_match(self, val, groupe):
-        if pd.isna(val): 
-            return False
-        try:
-            return int(float(val)) == int(groupe)
-        except:
-            return False
-
-    def compter_colles_groupe_semaine(self, g, semaine):
-        if semaine not in self.df.columns: 
-            return 0
-        return sum(1 for _,row in self.df.iterrows() if self.is_group_match(row[semaine], g))
-
-    def stats_groupes(self):
-        group_counts = {g:0 for g in self.groups}
-        for s in self.weeks:
-            for _, row in self.df.iterrows():
-                try:
-                    v = int(float(row[s])) if not pd.isna(row[s]) else None
-                    if v in group_counts:
-                        group_counts[v] += 1
-                except:
-                    pass
-        return group_counts
-
-    def stats_matieres(self):
-        mat_counts = {m:0 for m in self.df['Matière'].unique()}
-        for s in self.weeks:
-            for _, row in self.df.iterrows():
-                for g in self.groups:
-                    if self.is_group_match(row[s], g):
-                        mat_counts[row['Matière']] += 1
-        return mat_counts
-
-    def stats_profs(self):
-        prof_counts = {p:0 for p in self.df['Prof'].unique()}
-        for s in self.weeks:
-            for _, row in self.df.iterrows():
-                for g in self.groups:
-                    if self.is_group_match(row[s], g):
-                        prof_counts[row['Prof']] += 1
-        return prof_counts
-
-    def charge_hebdo(self):
-        return {
-            g: [self.compter_colles_groupe_semaine(g, str(w)) for w in _numeric_week_cols(self.df)]
-            for g in self.groups
-        }
-
-    def verifier_contraintes_groupe(self, g): 
-        return []
-
-    def verifier_contraintes_globales(self): 
-        return []
-
-    def statistiques_globales(self):
-        total = 0
-        used = 0
-
-        for s in self.weeks:
-            if s not in self.df.columns:
-                continue
-            for _, row in self.df.iterrows():
-                val = row[s]
-                # Si la cellule n'est pas vide → c'est bien un créneau "réel"
-                if not pd.isna(val) and str(val).strip() != "":
-                    total += 1
-                    # S'il contient un groupe assigné → utilisé
-                    try:
-                        if int(float(val)) in self.groups:
-                            used += 1
-                    except:
-                        pass
-
-        return {
-            "total_creneaux": total,
-            "creneaux_utilises": used,
-            "taux_utilisation": round(used/total*100, 1) if total > 0 else 0
-        }
 # -----------------------
 # API ROUTES
 # -----------------------
@@ -724,22 +816,42 @@ async def generate_planning():
     }
 
 @app.post("/api/analyse_planning")
-async def analyse_planning():
-    global generated_planning
-    if not generated_planning: 
-        return JSONResponse(status_code=400, content={"error":"Aucun planning généré."})
-    
-    analyzer=PlanningAnalyzer(generated_planning)
-    return {
-        "stats":{
-            "groupes":analyzer.stats_groupes(),
-            "matieres":analyzer.stats_matieres(),
-            "profs":analyzer.stats_profs(),
-            "charge_hebdo":analyzer.charge_hebdo(),
-            "globales":analyzer.statistiques_globales()
-        },
-        "contraintes":{"groupes":{},"globales":[]}
-    }
+async def analyse_planning(file: UploadFile = File(...)):
+    """
+    Attend un upload CSV via form-data: clé "file"
+    """
+    if not file:
+        return JSONResponse(content={"error": "Aucun fichier reçu"}, status_code=400)
+
+    try:
+        content = (await file.read()).decode("utf-8")
+        analyzer = PlanningAnalyzer(content)
+
+        stats = {
+            "groupes": analyzer.stats_groupes(),
+            "matieres": analyzer.stats_matieres(),
+            "profs": analyzer.stats_profs(),
+            "charge_hebdo": analyzer.charge_hebdo(),
+            "globales": analyzer.statistiques_globales()
+        }
+
+        contraintes = analyzer.contraintes()
+
+        resume = {
+            "total_erreurs": len(contraintes["globales"]) + sum(len(v) for v in contraintes["groupes"].values()) + len(contraintes["consecutives"]),
+            "globales_ok": len(contraintes["globales"]) == 0,
+            "groupes_ok": all(len(v) == 0 for v in contraintes["groupes"].values()),
+            "consecutives_ok": len(contraintes["consecutives"]) == 0,
+        }
+
+        return {
+            "resume": resume,
+            "stats": stats,
+            "contraintes": contraintes
+        }
+
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @app.get("/api/get_groups")
 def get_groups():
@@ -841,9 +953,6 @@ async def extend_planning(format: str = Query("csv", enum=["csv", "excel"])):
             out = io.BytesIO()
             out = export_excel_with_style(df24)
             out.seek(0)
-            #with pd.ExcelWriter(out, engine="xlsxwriter") as writer:
-            #    df24.to_excel(writer, index=False, sheet_name="Planning")
-            out.seek(0)
             return StreamingResponse(
                 out,
                 media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -862,4 +971,4 @@ async def extend_planning(format: str = Query("csv", enum=["csv", "excel"])):
 
 @app.get("/api/hello")
 def hello(): 
-    return {"message":"Backend Planning Colles avec OR-Tools (3 niveaux) + extension 24 semaines par rotation de familles"}
+    return {"message":"Backend Planning Colles avec OR-Tools (semaines dynamiques) + extension 24 semaines par rotation de familles"}
