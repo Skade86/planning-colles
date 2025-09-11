@@ -5,7 +5,6 @@ import GenerateButton from './components/GenerateButton';
 import DownloadButton from './components/DownloadButton';
 import AnalysePage from './components/AnalysePage';
 import GroupeDetails from './components/GroupeDetails';
-import Extend24Button from './components/Extend24Button';
 import FormatToggle from './components/FormatToggle';
 import { Navbar, Nav, Container } from "react-bootstrap";
 import Form from 'react-bootstrap/Form';  // 👉 à ajouter en haut
@@ -85,7 +84,6 @@ function App() {
                 <FormatToggle format={downloadFormat} setFormat={setDownloadFormat} />
                 <div className="d-flex flex-wrap gap-2 mt-2">
                   <DownloadButton format={downloadFormat} />
-                  <Extend24Button disabled={!planning} setStatus={setStatus} format={downloadFormat} />
                 </div>
               </div>
             )}

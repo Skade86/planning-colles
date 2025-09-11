@@ -35,48 +35,6 @@ def extract_all_groups(df):
         all_groups.update(parse_groups(row['Groupes possibles semaine impaire']))
     return sorted(list(all_groups))
 
-def _unique_minimal_families(families):
-    """
-    Conserve les sous-plages minimales:
-    - élimine les familles qui sont des sur-ensembles stricts d'une autre
-    - déduplique
-    """
-    # normaliser en tuples triés uniques
-    norm = []
-    for fam in families:
-        if fam:
-            t = tuple(sorted(set(int(x) for x in fam)))
-            if t not in norm:
-                norm.append(t)
-    # enlever les sur-ensembles
-    keep = []
-    for f in norm:
-        is_superset = any(set(other).issubset(set(f)) and set(other) != set(f) for other in norm)
-        if not is_superset:
-            keep.append(f)
-    # retourner en listes
-    return [list(f) for f in keep]
-
-def detect_group_families(df):
-    """
-    Détecte automatiquement les familles de groupes à partir des colonnes
-    'Groupes possibles semaine paire' et 'Groupes possibles semaine impaire'.
-    On retourne des sous-plages minimales (ex: [1..8], [9..16] plutôt que [1..16]).
-    """
-    raw_families = []
-    for col in ['Groupes possibles semaine paire', 'Groupes possibles semaine impaire']:
-        if col not in df.columns:
-            continue
-        for _, val in df[col].dropna().items():
-            fam = parse_groups(val)
-            if fam:
-                raw_families.append(fam)
-    families = _unique_minimal_families(raw_families)
-    # si aucune famille détectée, fallback = une seule famille avec tous les groupes
-    if not families:
-        families = [extract_all_groups(df)]
-    return families
-
 # -----------------------
 # Utils semaines dynamiques
 # -----------------------
@@ -348,148 +306,12 @@ def generate_planning_with_ortools(csv_content, mode="strict"):
         "relaxed": "Planning généré (semaines dynamiques, contraintes relâchées, consécutives interdites)",
         "maximize": "Planning généré (semaines dynamiques, max colles & min colles consécutives)"
     }
-
     #df = adjust_late_slots(df)
     return df, mode_msg.get(mode, f"Planning généré en mode {mode}")
 
 # -----------------------
-# Extension à 24 semaines (rotation par familles détectées)
+# Export Excel avec style
 # -----------------------
-def _numeric_week_cols(df):
-    return sorted([int(c) for c in df.columns if str(c).isdigit()])
-
-def extend_to_24_weeks(df8_weeks_csv: str, original_csv: str) -> pd.DataFrame:
-    """
-    df8_weeks_csv: CSV du planning déjà généré (8 semaines)
-    original_csv: CSV d'origine (pour détecter les familles)
-    Retourne un DataFrame avec 24 semaines:
-      - Bloc 1: semaines existantes (8)
-      - Bloc 2: rotation +1 cran au sein de chaque famille
-      - Bloc 3: rotation +2 crans au sein de chaque famille
-    """
-    df8 = pd.read_csv(io.StringIO(df8_weeks_csv), sep=';')
-    df_orig = pd.read_csv(io.StringIO(original_csv), sep=';')
-
-    families = detect_group_families(df_orig)  # ex: [[1..8], [9..16]]
-    print(f"[INFO] Familles détectées pour rotation: {families}")
-
-    week_cols = _numeric_week_cols(df8)
-    if len(week_cols) < 8:
-        raise ValueError("Le planning 8 semaines ne contient pas 8 colonnes de semaines numériques.")
-
-    base_weeks_sorted = week_cols[:8]
-    max_week = max(base_weeks_sorted)
-
-    # On va créer 16 nouvelles colonnes après la dernière semaine existante
-    # Bloc 2: +1 cran, Bloc 3: +2 crans
-    for block_shift in [1, 2]:
-        for idx, base_w in enumerate(base_weeks_sorted):
-            new_week = max_week + (block_shift - 1) * 8 + (idx + 1)
-            new_week_str = str(new_week)
-            base_col = df8[str(base_w)].copy()
-
-            # Appliquer la rotation famille par famille
-            col_rot = base_col.copy()
-            for fam in families:
-                fam_sorted = list(sorted(fam))
-                # mapping de remplacement pour ce shift
-                mapping = {}
-                size = len(fam_sorted)
-                if size <= 1:
-                    continue
-                # Construire mapping str(g) -> str(rotated)
-                for pos, g in enumerate(fam_sorted):
-                    rotated = fam_sorted[(pos + block_shift) % size]
-                    mapping[str(g)] = str(rotated)
-                # appliquer mapping
-                col_rot = col_rot.replace(mapping)
-
-            df8[new_week_str] = col_rot
-            
-    # Corriger les numéros de groupes : forcer en entiers ou vide
-    for col in df8.columns:
-        if str(col).isdigit():
-            df8[col] = (
-                df8[col]
-                .apply(lambda v: str(int(float(v))) if str(v).replace('.', '', 1).isdigit() else ("" if pd.isna(v) else str(v)))
-            )
-
-    return df8
-
-def adjust_late_slots(df):
-    """
-    Corrige les cas où un prof a deux créneaux consécutifs (même jour)
-    avec un seul rempli. Si possible, on vide toujours le créneau le plus tardif
-    pour que le colleur termine plus tôt.
-    
-    CORRECTION: Vérifie maintenant les contraintes paire/impaire avant déplacement.
-    """
-    week_cols = [c for c in df.columns if str(c).isdigit()]
-
-    # Pour chaque prof et chaque jour de la semaine
-    for prof in df['Prof'].unique():
-        for day in df['Jour'].unique():
-            # Extraire les créneaux de ce prof à ce jour
-            subset = df[(df['Prof'] == prof) & (df['Jour'] == day)].copy()
-
-            # Trier dans l'ordre des heures (important pour détecter "avant / après")
-            subset = subset.sort_values('Heure')
-
-            row_indices = list(subset.index)
-
-            # Parcourir semaine par semaine
-            for w in week_cols:
-                prev_idx = None
-                for idx in row_indices:
-                    g = str(df.at[idx, w]) if not pd.isna(df.at[idx, w]) and str(df.at[idx, w]).strip() != "" else ""
-
-                    if prev_idx is not None:
-                        prev_g = str(df.at[prev_idx, w]) if not pd.isna(df.at[prev_idx, w]) and str(df.at[prev_idx, w]).strip() != "" else ""
-
-                        # Cas : groupe uniquement sur le créneau tardif
-                        if g != "" and prev_g == "":
-                            try:
-                                group_id = int(g)  # Convertir en int pour les vérifications
-                            except ValueError:
-                                continue  # Ignorer si pas un nombre valide
-
-                            # Vérifier qu'il n'y a pas déjà une colle pour ce groupe à l'heure précédente dans df
-                            jour_prev = df.at[prev_idx, 'Jour']
-                            heure_prev = df.at[prev_idx, 'Heure']
-
-                            conflict = False
-                            for _, row in df[df['Jour'] == jour_prev].iterrows():
-                                if str(row[w]).strip() == str(group_id) and row['Heure'] == heure_prev:
-                                    conflict = True
-                                    break
-
-                            # ✅ NOUVELLE VÉRIFICATION : contraintes paire/impaire
-                            if not conflict:
-                                try:
-                                    week_num = int(w)
-                                    prev_row = df.iloc[prev_idx]
-                                    
-                                    if week_num % 2 == 0:  # Semaine paire
-                                        allowed_groups = parse_groups(prev_row['Groupes possibles semaine paire'])
-                                    else:  # Semaine impaire
-                                        allowed_groups = parse_groups(prev_row['Groupes possibles semaine impaire'])
-                                    
-                                    # Vérifier si le groupe est autorisé dans le créneau précédent
-                                    if group_id not in allowed_groups:
-                                        conflict = True  # Empêcher le déplacement
-                                        print(f"[DEBUG] Déplacement bloqué: Groupe {group_id} non autorisé en semaine {week_num} ({'paire' if week_num % 2 == 0 else 'impaire'}) pour {prev_row['Prof']} {prev_row['Jour']} {prev_row['Heure']}")
-                                
-                                except (ValueError, KeyError):
-                                    conflict = True  # En cas d'erreur, ne pas déplacer
-
-                            # Si pas de conflit → décaler le groupe au créneau précédent
-                            if not conflict:
-                                df.at[prev_idx, w] = group_id
-                                df.at[idx, w] = ""
-                                print(f"[DEBUG] Déplacement OK: Groupe {group_id} déplacé vers {prev_row['Prof']} {prev_row['Jour']} {prev_row['Heure']} semaine {w}")
-
-                    prev_idx = idx
-    return df
 
 def export_excel_with_style(df):
     out = io.BytesIO()
@@ -935,40 +757,6 @@ async def download_planning(format: str = Query("csv", enum=["csv", "excel"])):
             headers={"Content-Disposition": "attachment; filename=planning_optimise.csv"}
         )
 
-@app.post("/api/extend_planning")
-async def extend_planning(format: str = Query("csv", enum=["csv", "excel"])):
-    """
-    Étend le planning 8 semaines actuel à 24 semaines par rotations internes
-    aux familles de groupes détectées automatiquement à partir du CSV initial.
-    Le résultat est renvoyé soit en CSV (par défaut), soit en Excel si ?format=excel
-    """
-    global uploaded_csv, generated_planning
-    if not uploaded_csv or not generated_planning:
-        return JSONResponse(status_code=400, content={"error": "Générez d'abord un planning 8 semaines."})
-    
-    try:
-        df24 = extend_to_24_weeks(generated_planning, uploaded_csv)
-        
-        if format == "excel":
-            out = io.BytesIO()
-            out = export_excel_with_style(df24)
-            out.seek(0)
-            return StreamingResponse(
-                out,
-                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                headers={"Content-Disposition": "attachment; filename=planning_24_semaines.xlsx"}
-            )
-        else:  # CSV par défaut
-            out = io.StringIO()
-            df24.to_csv(out, sep=';', index=False)
-            return StreamingResponse(
-                io.StringIO(out.getvalue()),
-                media_type="text/csv",
-                headers={"Content-Disposition": "attachment; filename=planning_24_semaines.csv"}
-            )
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": f"Extension impossible: {str(e)}"})
-
 @app.get("/api/hello")
-def hello(): 
-    return {"message":"Backend Planning Colles avec OR-Tools (semaines dynamiques) + extension 24 semaines par rotation de familles"}
+def hello():
+    return {"message":"Backend Planning Colles avec OR-Tools (semaines dynamiques)"}
