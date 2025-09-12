@@ -51,6 +51,32 @@ export default function AnalysePage() {
     }
   };
 
+  const handleAnalyseGenerated = async () => {
+    setLoading(true);
+    setErrorMsg("");
+
+    try {
+      const res = await fetch(`${BASE_URL}/api/analyse_planning_generated`, {
+        method: "GET"
+      });
+
+      if (!res.ok) {
+        let details = "";
+        try { details = await res.text(); } catch { /* empty */ }
+        throw new Error(`Erreur ${res.status} ${res.statusText}${details ? ` - ${details}` : ""}`);
+      }
+
+      const result = await res.json();
+      setData(result);
+      setFile(null); // Reset file selection
+    } catch (err) {
+      console.error("Erreur analyse planning généré:", err);
+      setErrorMsg(err.message || "Erreur lors de l'analyse du planning généré.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const renderBarChart = (title, obj) => {
     if (!obj || Object.keys(obj).length === 0) return (
       <div style={{ marginTop: 24 }}>
@@ -118,9 +144,21 @@ export default function AnalysePage() {
         <input className="form-control" type="file" accept=".csv,text/csv" onChange={handleFileChange} />
       </div>
 
-      <button className="btn btn-primary" onClick={handleAnalyse} disabled={loading}>
-        {loading ? "Analyse en cours..." : "Analyser le planning"}
-      </button>
+      <div className="mb-3">
+        <button className="btn btn-primary me-2" onClick={handleAnalyse} disabled={loading}>
+          {loading ? "Analyse en cours..." : "Analyser le fichier"}
+        </button>
+        <button className="btn btn-success" onClick={handleAnalyseGenerated} disabled={loading}>
+          {loading ? "Analyse en cours..." : "Analyser le planning généré"}
+        </button>
+      </div>
+
+      <div className="mb-2">
+        <small className="text-muted">
+          💡 <strong>Analyser le fichier</strong> : sélectionnez un fichier CSV à analyser<br/>
+          💡 <strong>Analyser le planning généré</strong> : analyse directe du dernier planning créé
+        </small>
+      </div>
 
       {errorMsg && (
         <div className="alert alert-danger mt-3" role="alert">

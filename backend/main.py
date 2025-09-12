@@ -768,6 +768,48 @@ async def analyse_planning(file: UploadFile = File(...)):
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
+@app.get("/api/analyse_planning_generated")
+def analyse_planning_generated():
+    """
+    Analyse le planning généré en mémoire (sans upload de fichier)
+    """
+    global generated_planning
+    if not generated_planning:
+        return JSONResponse(status_code=400, content={"error": "Aucun planning généré."})
+
+    try:
+        analyzer = PlanningAnalyzer(generated_planning)
+
+        stats = {
+            "groupes": analyzer.stats_groupes(),
+            "matieres": analyzer.stats_matieres(),
+            "profs": analyzer.stats_profs(),
+            "charge_hebdo": analyzer.charge_hebdo(),
+            "globales": analyzer.statistiques_globales()
+        }
+
+        contraintes = analyzer.contraintes()
+
+        resume = {
+            "total_erreurs": (len(contraintes["globales"]) +
+                              sum(len(v) for v in contraintes["groupes"].values()) +
+                              len(contraintes["consecutives"]) +
+                              len(contraintes["compatibilites_profs"])),
+            "globales_ok": len(contraintes["globales"]) == 0,
+            "groupes_ok": all(len(v) == 0 for v in contraintes["groupes"].values()),
+            "consecutives_ok": len(contraintes["consecutives"]) == 0,
+            "compatibilites_profs_ok": len(contraintes["compatibilites_profs"]) == 0,
+        }
+
+        return {
+            "resume": resume,
+            "stats": stats,
+            "contraintes": contraintes
+        }
+
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
 @app.get("/api/get_groups")
 def get_groups():
     global generated_planning
