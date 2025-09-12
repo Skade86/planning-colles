@@ -451,14 +451,29 @@ class PlanningAnalyzer:
                 if count != 1:
                     erreurs.append(f"{matiere} - Bloc {bloc}: {count} colles (attendu: 1)")
 
-        # Français → 1 par 8 semaines
-        for bloc in self.groups_8:
+        # Français → 1 par 8 semaines (vérification robuste)
+        if self.groups_8:
+            # Si on a des blocs de 8 semaines complets, on les utilise
+            for bloc in self.groups_8:
+                count = sum(
+                    sum(1 for colle in group_weeks.get(w, [])
+                        if colle[0].strip().lower() in ["français", "francais"])
+                    for w in bloc
+                )
+                if count != 1:
+                    erreurs.append(f"Français - Bloc {bloc}: {count} colles (attendu: 1)")
+        else:
+            # Si pas de bloc de 8 semaines complet, on vérifie sur toute la période
+            # (max 1 colle de français sur toute la période)
             count = sum(
-                sum(1 for colle in group_weeks.get(w, []) if colle[0] == "Français")
-                for w in bloc
+                sum(1 for colle in group_weeks.get(w, [])
+                    if colle[0].strip().lower() in ["français", "francais"])
+                for w in self.weeks
             )
-            if count != 1:
-                erreurs.append(f"Français - Bloc {bloc}: {count} colles (attendu: 1)")
+            if count > 1:
+                erreurs.append(f"Français - Période complète {tuple(self.weeks)}: {count} colles (max 1 autorisée sur {len(self.weeks)} semaines)")
+                erreurs.append(f"Français - Période complète {tuple(self.weeks)}: {count} colles (max 1 autorisée)")
+            # Note: on n'exige pas 1 colle si la période est courte
 
         # Pas plus d'1 colle par jour
         for week in self.weeks:
@@ -581,12 +596,56 @@ class PlanningAnalyzer:
         taux = round((used/total_slots)*100, 1) if total_slots else 0
         return {"total_creneaux": total_slots, "creneaux_utilises": used, "taux_utilisation": taux}
 
+    # -------------------- COMPATIBILITÉS PROFESSEURS --------------------
+    def verifier_compatibilites_profs(self):
+        """
+        Vérifie que les professeurs respectent leurs disponibilités paires/impaires
+        """
+        erreurs = []
+
+        for _, row in self.df.iterrows():
+            prof = row.get("Prof", "Inconnu")
+            matiere = row.get("Matière", "Inconnue")
+            jour = row.get("Jour", "Inconnu")
+            heure = row.get("Heure", "Inconnu")
+
+            # Récupérer les disponibilités du prof
+            travaille_paires = str(row.get("Travaille les semaines paires", "")).strip().lower() == "oui"
+            travaille_impaires = str(row.get("Travaille les semaines impaires", "")).strip().lower() == "oui"
+
+            # Vérifier chaque semaine où ce prof a une colle
+            for week in self.weeks:
+                week_str = str(week)
+                val = row.get(week_str, "")
+
+                try:
+                    groupe = int(val)
+                except (ValueError, TypeError):
+                    continue  # Pas de groupe assigné cette semaine
+
+                # Vérifier la compatibilité semaine paire/impaire
+                is_even_week = week % 2 == 0
+
+                if is_even_week and not travaille_paires:
+                    erreurs.append(
+                        f"Prof {prof} ({matiere}) a une colle groupe {groupe} en semaine {week} (PAIRE) "
+                        f"mais ne travaille pas les semaines paires ({jour} {heure})"
+                    )
+                elif not is_even_week and not travaille_impaires:
+                    erreurs.append(
+                        f"Prof {prof} ({matiere}) a une colle groupe {groupe} en semaine {week} (IMPAIRE) "
+                        f"mais ne travaille pas les semaines impaires ({jour} {heure})"
+                    )
+
+        return erreurs
+
     # -------------------- WRAPPER --------------------
     def contraintes(self):
         return {
             "globales": self.verifier_contraintes_globales(),
             "groupes": {g: self.verifier_contraintes_groupe(g) for g in self.groups},
-            "consecutives": self.verifier_colles_consecutives()
+            "consecutives": self.verifier_colles_consecutives(),
+            "compatibilites_profs": self.verifier_compatibilites_profs()
         }
 
 # -----------------------
@@ -660,10 +719,14 @@ async def analyse_planning(file: UploadFile = File(...)):
         contraintes = analyzer.contraintes()
 
         resume = {
-            "total_erreurs": len(contraintes["globales"]) + sum(len(v) for v in contraintes["groupes"].values()) + len(contraintes["consecutives"]),
+            "total_erreurs": (len(contraintes["globales"]) +
+                              sum(len(v) for v in contraintes["groupes"].values()) +
+                              len(contraintes["consecutives"]) +
+                              len(contraintes["compatibilites_profs"])),
             "globales_ok": len(contraintes["globales"]) == 0,
             "groupes_ok": all(len(v) == 0 for v in contraintes["groupes"].values()),
             "consecutives_ok": len(contraintes["consecutives"]) == 0,
+            "compatibilites_profs_ok": len(contraintes["compatibilites_profs"]) == 0,
         }
 
         return {

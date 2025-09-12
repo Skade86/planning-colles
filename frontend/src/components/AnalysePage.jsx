@@ -106,7 +106,13 @@ export default function AnalysePage() {
   return (
     <div style={{ padding: "1rem" }}>
       <h2>Analyse du planning</h2>
-      <p>Cette page permet d’analyser le planning généré et de vérifier le respect des contraintes.</p>
+      <p>Cette page permet d'analyser le planning généré et de vérifier le respect des contraintes :</p>
+      <ul style={{ fontSize: "0.9em", color: "#666" }}>
+        <li><strong>Contraintes globales</strong> : Pas de conflits (2 groupes/prof en parallèle, 2 colles/groupe simultanées)</li>
+        <li><strong>Contraintes par groupe</strong> : Bon nombre de colles par matière (Maths/Physique/Anglais: 1/quinzaine, Chimie/S.I: 1/mois, Français: 1/8sem)</li>
+        <li><strong>Colles consécutives</strong> : Détection des créneaux adjacents le même jour</li>
+        <li><strong>Compatibilités professeurs</strong> : Respect des disponibilités paires/impaires</li>
+      </ul>
 
       <div className="mb-3" style={{ maxWidth: 420 }}>
         <input className="form-control" type="file" accept=".csv,text/csv" onChange={handleFileChange} />
@@ -137,6 +143,7 @@ export default function AnalysePage() {
               <li>Contraintes globales : {data?.resume?.globales_ok ? "✅" : "❌"}</li>
               <li>Contraintes par groupe : {data?.resume?.groupes_ok ? "✅" : "❌"}</li>
               <li>Colles consécutives : {data?.resume?.consecutives_ok ? "✅" : "❌"}</li>
+              <li>Compatibilités professeurs : {data?.resume?.compatibilites_profs_ok ? "✅" : "❌"}</li>
             </ul>
 
             <h3 className="mt-4">Statistiques</h3>
@@ -176,6 +183,13 @@ export default function AnalysePage() {
               <ul>{data.contraintes.consecutives.map((c, i) => <li key={i}>{c}</li>)}</ul>
             ) : (
               <p style={{ color: "green" }}>✅ Aucune colle consécutive</p>
+            )}
+
+            <h4>Compatibilités professeurs</h4>
+            {Array.isArray(data?.contraintes?.compatibilites_profs) && data.contraintes.compatibilites_profs.length > 0 ? (
+              <ul>{data.contraintes.compatibilites_profs.map((c, i) => <li key={i} style={{ color: "red" }}>{c}</li>)}</ul>
+            ) : (
+              <p style={{ color: "green" }}>✅ Toutes les compatibilités professeurs respectées</p>
             )}
           </div>
         </div>
