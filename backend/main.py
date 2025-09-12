@@ -360,12 +360,11 @@ class PlanningAnalyzer:
     def __init__(self, csv_content):
         self.df = pd.read_csv(io.StringIO(csv_content), sep=';')
 
-        # Semaines dynamiques (colonnes numériques)
+        # Semaines dynamiques (colonnes numériques, ordre du CSV, non trié)
         self.weeks = [int(c) for c in self.df.columns if str(c).isdigit()]
-        self.weeks.sort()
+        # NE PAS trier les semaines, respecter l'ordre du CSV
         self.groups = list(range(1, 16))  # 15 groupes
 
-        # Fenêtres dynamiques NON CHEVAUCHANTES (comme OR-Tools)
         def make_windows_non_overlapping(weeks, size):
             return [tuple(weeks[i:i+size]) for i in range(0, len(weeks), size)
                     if len(weeks[i:i+size]) == size]
@@ -584,17 +583,31 @@ class PlanningAnalyzer:
         return charge
 
     def statistiques_globales(self):
-        total_slots = len(self.df) * len(self.weeks)
+        # Calcul des créneaux réellement autorisés (selon contraintes du CSV)
+        total_authorized = 0
         used = 0
-        for w in [str(w) for w in self.weeks]:
-            for v in self.df[w]:
-                try:
-                    int(v)
-                    used += 1
-                except (ValueError, TypeError):
-                    continue
-        taux = round((used/total_slots)*100, 1) if total_slots else 0
-        return {"total_creneaux": total_slots, "creneaux_utilises": used, "taux_utilisation": taux}
+        
+        for w_int in self.weeks:
+            w_str = str(w_int)
+            is_even = w_int % 2 == 0
+            
+            for _, row in self.df.iterrows():
+                # Vérifier si le prof travaille cette semaine
+                works_even = str(row.get('Travaille les semaines paires', '')).strip().lower() == 'oui'
+                works_odd = str(row.get('Travaille les semaines impaires', '')).strip().lower() == 'oui'
+                
+                if (is_even and works_even) or (not is_even and works_odd):
+                    total_authorized += 1
+                    
+                    # Vérifier si un groupe est affecté à ce créneau
+                    try:
+                        int(row[w_str])
+                        used += 1
+                    except (ValueError, TypeError):
+                        continue
+        
+        taux = round((used/total_authorized)*100, 1) if total_authorized else 0
+        return {"total_creneaux": total_authorized, "creneaux_utilises": used, "taux_utilisation": taux}
 
     # -------------------- COMPATIBILITÉS PROFESSEURS --------------------
     def verifier_compatibilites_profs(self):
@@ -638,6 +651,23 @@ class PlanningAnalyzer:
                     )
 
         return erreurs
+
+    # -------------------- MÉTHODES UTILITAIRES --------------------
+    def is_group_match(self, cell_value, groupe_id):
+        """Vérifie si la valeur de la cellule correspond au groupe donné"""
+        try:
+            return int(cell_value) == groupe_id
+        except (ValueError, TypeError):
+            return False
+
+    def compter_colles_groupe_semaine(self, groupe_id, semaine):
+        """Compte le nombre de colles pour un groupe dans une semaine donnée"""
+        count = 0
+        semaine_str = str(semaine)
+        for _, row in self.df.iterrows():
+            if self.is_group_match(row.get(semaine_str, ""), groupe_id):
+                count += 1
+        return count
 
     # -------------------- WRAPPER --------------------
     def contraintes(self):
@@ -762,8 +792,9 @@ def group_details(groupe_id: int):
         # Créneaux du groupe
         creneaux = []
         for s in analyzer.weeks:
+            s_str = str(s)
             for _, row in analyzer.df.iterrows():
-                if analyzer.is_group_match(row[s], groupe_id):
+                if analyzer.is_group_match(row.get(s_str, ""), groupe_id):
                     creneaux.append({
                         "semaine": s,
                         "matiere": row["Matière"],
@@ -783,8 +814,9 @@ def group_details(groupe_id: int):
         for matiere in analyzer.df["Matière"].unique():
             count = 0
             for s in analyzer.weeks:
+                s_str = str(s)
                 for _, row in analyzer.df.iterrows():
-                    if row["Matière"] == matiere and analyzer.is_group_match(row[s], groupe_id):
+                    if row["Matière"] == matiere and analyzer.is_group_match(row.get(s_str, ""), groupe_id):
                         count += 1
             stats["colles_par_matiere"][matiere] = count
 
