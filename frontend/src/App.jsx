@@ -5,6 +5,7 @@ import GenerateButton from './components/GenerateButton';
 import DownloadButton from './components/DownloadButton';
 import AnalysePage from './components/AnalysePage';
 import GroupeDetails from './components/GroupeDetails';
+import SaisiePage from './components/SaisiePage';
 import FormatToggle from './components/FormatToggle';
 import { Navbar, Nav, Container } from "react-bootstrap";
 import Form from 'react-bootstrap/Form';  // 👉 à ajouter en haut
@@ -14,7 +15,7 @@ function App() {
   const [planning, setPlanning] = useState(null);
   const [preview, setPreview] = useState(null);
   const [status, setStatus] = useState(null);
-  const [currentPage, setCurrentPage] = useState('planning'); // onglet actif
+  const [currentPage, setCurrentPage] = useState('saisie'); // onglet actif par défaut
 
   // Nouveaux states pour gestion groupes
   const [groups, setGroups] = useState([]);
@@ -51,6 +52,7 @@ function App() {
                 onSelect={(selectedKey) => setCurrentPage(selectedKey)}
                 className="me-auto"
               >
+                <Nav.Link eventKey="saisie">Saisie</Nav.Link>
                 <Nav.Link eventKey="planning">Planning</Nav.Link>
                 <Nav.Link eventKey="analyse">Analyse</Nav.Link>
                 <Nav.Link eventKey="groupe">Détail groupe</Nav.Link>
@@ -62,6 +64,11 @@ function App() {
 
       {/* ✅ Contenu principal */}
       <main className="container-fluid mt-4">
+        {/* Page Saisie */}
+        {currentPage === 'saisie' && (
+          <SaisiePage />
+        )}
+
         {/* Page Planning */}
         {currentPage === 'planning' && (
           <div>

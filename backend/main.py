@@ -894,6 +894,105 @@ async def download_planning(format: str = Query("csv", enum=["csv", "excel"])):
             headers={"Content-Disposition": "attachment; filename=planning_optimise.csv"}
         )
 
+@app.post("/api/generate_from_form")
+async def generate_from_form(form_data: dict):
+    """
+    Génère un planning à partir des données du formulaire de saisie
+    """
+    global generated_planning
+    
+    try:
+        # Convertir les données du formulaire en CSV
+        csv_content = convert_form_to_csv(form_data)
+        
+        # Générer le planning avec OR-Tools (essai des 3 modes)
+        print("[INFO] Tentative mode strict...")
+        df_result, message = generate_planning_with_ortools(csv_content, mode="strict")
+        
+        if df_result is None:
+            print("[INFO] Échec mode strict, tentative mode relaxed...")
+            df_result, message = generate_planning_with_ortools(csv_content, mode="relaxed")
+            
+            if df_result is None:
+                print("[INFO] Échec mode relaxed, tentative mode maximize...")
+                df_result, message = generate_planning_with_ortools(csv_content, mode="maximize")
+                
+                if df_result is None:
+                    return JSONResponse(
+                        status_code=400, 
+                        content={"error": "Impossible de générer un planning avec les contraintes données"}
+                    )
+
+        # Sauvegarder le planning généré
+        output = io.StringIO()
+        df_result.to_csv(output, sep=';', index=False)
+        generated_planning = output.getvalue()
+        
+        return {
+            "header": df_result.columns.tolist(),
+            "rows": df_result.values.tolist(),
+            "message": message + " (généré depuis le formulaire)"
+        }
+        
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Erreur lors de la génération: {str(e)}"}
+        )
+
+def convert_form_to_csv(form_data):
+    """
+    Convertit les données du formulaire en format CSV équivalent
+    """
+    semaines = form_data.get('semaines', [])
+    professeurs = form_data.get('professeurs', [])
+    creneaux = form_data.get('creneaux', [])
+    
+    # Créer les en-têtes
+    headers = [
+        'Matière', 'Prof', 'Jour', 'Heure',
+        'Groupes possibles semaine paire', 'Groupes possibles semaine impaire',
+        'Travaille les semaines paires', 'Travaille les semaines impaires'
+    ] + [str(s) for s in semaines]
+    
+    # Créer les lignes de données
+    rows = []
+    for creneau in creneaux:
+        # Trouver le professeur correspondant
+        prof_info = None
+        for prof in professeurs:
+            if prof.get('nom') == creneau.get('professeur'):
+                prof_info = prof
+                break
+        
+        if not prof_info:
+            continue
+            
+        # Formater les plages de groupes
+        groupes_paires = f"{creneau.get('groupesPaires', {}).get('min', 1)} à {creneau.get('groupesPaires', {}).get('max', 15)}"
+        groupes_impaires = f"{creneau.get('groupesImpaires', {}).get('min', 1)} à {creneau.get('groupesImpaires', {}).get('max', 15)}"
+        
+        # Ligne de données
+        row = [
+            creneau.get('matiere', ''),
+            creneau.get('professeur', ''),
+            creneau.get('jour', ''),
+            creneau.get('heure', ''),
+            groupes_paires,
+            groupes_impaires,
+            'Oui' if prof_info.get('travaillePaires', True) else 'Non',
+            'Oui' if prof_info.get('travailleImpaires', True) else 'Non'
+        ] + [''] * len(semaines)  # Colonnes semaines vides initialement
+        
+        rows.append(row)
+    
+    # Créer le CSV
+    csv_content = ';'.join(headers) + '\n'
+    for row in rows:
+        csv_content += ';'.join(str(cell) for cell in row) + '\n'
+    
+    return csv_content
+
 @app.get("/api/hello")
 def hello():
     return {"message":"Backend Planning Colles avec OR-Tools (semaines dynamiques)"}
