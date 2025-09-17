@@ -4,8 +4,10 @@ import {
 } from "recharts";
 
 const BASE_URL = "http://localhost:8000";
+import { useAuth } from "../AuthContext";
 
 export default function AnalysePage() {
+  const { token } = useAuth();
   const [file, setFile] = useState(null);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -32,7 +34,8 @@ export default function AnalysePage() {
 
       const res = await fetch(`${BASE_URL}/api/analyse_planning`, {
         method: "POST",
-        body: formData
+        body: formData,
+        headers: { 'Authorization': `Bearer ${token}` },
       });
 
       if (!res.ok) {
@@ -58,6 +61,7 @@ export default function AnalysePage() {
     try {
       const res = await fetch(`${BASE_URL}/api/analyse_planning_generated`, {
         method: "GET"
+        , headers: { 'Authorization': `Bearer ${token}` }
       });
 
       if (!res.ok) {

@@ -10,8 +10,11 @@ import FormatToggle from './components/FormatToggle';
 import { Navbar, Nav, Container } from "react-bootstrap";
 import Form from 'react-bootstrap/Form';  // 👉 à ajouter en haut
 import './App.css';
+import Login from './components/Login';
+import { useAuth } from './AuthContext';
 
 function App() {
+  const { isAuthenticated, user, logout } = useAuth();
   const [planning, setPlanning] = useState(null);
   const [preview, setPreview] = useState(null);
   const [status, setStatus] = useState(null);
@@ -27,7 +30,9 @@ function App() {
   // Charger la liste des groupes après génération d'un planning
   useEffect(() => {
     if (planning) {
-      fetch("http://localhost:8000/api/get_groups")
+      fetch("http://localhost:8000/api/get_groups", {
+        headers: user ? { 'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}` } : {}
+      })
         .then((res) => res.json())
         .then((data) => {
           if (data.groups) {
@@ -36,7 +41,7 @@ function App() {
         })
         .catch((err) => console.error("Erreur chargement groupes:", err));
     }
-  }, [planning]);
+  }, [planning, user]);
 
   return (
     <div>
@@ -57,6 +62,16 @@ function App() {
                 <Nav.Link eventKey="analyse">Analyse</Nav.Link>
                 <Nav.Link eventKey="groupe">Détail groupe</Nav.Link>
               </Nav>
+              <div className="text-white me-3 d-flex align-items-center">
+                {isAuthenticated ? (
+                  <>
+                    <span className="me-3">Connecté{user?.username ? `: ${user.username}` : ''}{user?.role ? ` (${user.role})` : ''}</span>
+                    <button className="btn btn-sm btn-outline-light" onClick={logout}>Se déconnecter</button>
+                  </>
+                ) : (
+                  <span>Non connecté</span>
+                )}
+              </div>
             </Navbar.Collapse>
           </Navbar>
         </Container>
@@ -66,7 +81,7 @@ function App() {
       <main className="container-fluid mt-4">
         {/* Page Saisie */}
         {currentPage === 'saisie' && (
-          <SaisiePage />
+          isAuthenticated ? <SaisiePage /> : <Login />
         )}
 
         {/* Page Planning */}
@@ -78,13 +93,18 @@ function App() {
                 Le backend doit être lancé sur <b>localhost:8000</b>.
               </span>
             </p>
-
-            <FileUpload setPreview={setPreview} setStatus={setStatus} />
+            {isAuthenticated ? (
+              <FileUpload setPreview={setPreview} setStatus={setStatus} />
+            ) : (
+              <Login />
+            )}
             {preview && <PlanningTable planning={preview} title="Prévisualisation du CSV" />}
 
-            <div className="d-flex flex-wrap gap-2 mt-2">
-              <GenerateButton setPlanning={setPlanning} setStatus={setStatus} />
-            </div>
+            {isAuthenticated && (
+              <div className="d-flex flex-wrap gap-2 mt-2">
+                <GenerateButton setPlanning={setPlanning} setStatus={setStatus} />
+              </div>
+            )}
 
             {planning && (
               <div className="mt-3">
@@ -106,7 +126,7 @@ function App() {
 
         {/* Page Analyse */}
         {currentPage === 'analyse' && (
-          <AnalysePage />
+          isAuthenticated ? <AnalysePage /> : <Login />
         )}
 
         {/* Page Détail Groupe */}

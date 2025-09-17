@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
+import { useAuth } from "../AuthContext";
 
 export default function GroupeDetails({ groupId }) {
+  const { token } = useAuth();
   const [details, setDetails] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -11,7 +13,9 @@ export default function GroupeDetails({ groupId }) {
     setDetails(null);
     setError(null);
 
-    fetch(`http://localhost:8000/api/group_details/${groupId}`)
+    fetch(`http://localhost:8000/api/group_details/${groupId}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
       .then((res) => {
         if (!res.ok) {
           throw new Error("Erreur API");

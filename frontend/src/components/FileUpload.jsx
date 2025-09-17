@@ -2,8 +2,10 @@ import React, { useRef, useState } from 'react';
 import Form from 'react-bootstrap/Form';
 import Card from 'react-bootstrap/Card';
 import Button from 'react-bootstrap/Button';
+import { useAuth } from '../AuthContext';
 
 function FileUpload({ setPreview, setStatus }) {
+  const { token } = useAuth();
   const fileInput = useRef();
   const [fileSelected, setFileSelected] = useState(false);
 
@@ -22,6 +24,7 @@ function FileUpload({ setPreview, setStatus }) {
       const res = await fetch('http://localhost:8000/api/upload_csv', {
         method: 'POST',
         body: formData,
+        headers: { 'Authorization': `Bearer ${token}` },
       });
 
       if (!res.ok) throw new Error('Erreur réseau');

@@ -1,12 +1,15 @@
 // src/components/DownloadButton.js
 import React from 'react';
 import Button from 'react-bootstrap/Button';
+import { useAuth } from '../AuthContext';
 
 function DownloadButton({ format = 'csv' }) {
+  const { token } = useAuth();
   const handleDownload = async () => {
     try {
       const res = await fetch(`http://localhost:8000/api/download_planning?format=${format}`, {
         method: 'GET',
+        headers: { 'Authorization': `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('Erreur serveur');
       const blob = await res.blob();

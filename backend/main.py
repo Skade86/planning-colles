@@ -1,11 +1,18 @@
 from fastapi import FastAPI, UploadFile, File, Query
+from fastapi import Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 import csv
 import io
 import pandas as pd
 from ortools.sat.python import cp_model
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
+from typing import Optional, Literal
+from pydantic import BaseModel
+from jose import JWTError, jwt
+from passlib.context import CryptContext
 
 app = FastAPI()
 
@@ -16,6 +23,115 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# -----------------------
+# Auth settings & models
+# -----------------------
+SECRET_KEY = "change-me-in-env"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 8
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+class TokenData(BaseModel):
+    username: Optional[str] = None
+    role: Optional[Literal["utilisateur", "professeur"]] = None
+
+class User(BaseModel):
+    username: str
+    role: Literal["utilisateur", "professeur"] = "utilisateur"
+
+class UserInDB(User):
+    hashed_password: str
+
+class SignupRequest(BaseModel):
+    username: str
+    password: str
+    role: Literal["utilisateur", "professeur"] = "utilisateur"
+
+# In-memory users DB (replace with real DB later)
+_users: dict[str, UserInDB] = {}
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+def get_user(username: str) -> Optional[UserInDB]:
+    return _users.get(username)
+
+def authenticate_user(username: str, password: str) -> Optional[UserInDB]:
+    user = get_user(username)
+    if not user:
+        return None
+    if not verify_password(password, user.hashed_password):
+        return None
+    return user
+
+async def get_current_user(token: str = Depends(oauth2_scheme)) -> UserInDB:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        role: str = payload.get("role")
+        if username is None or role is None:
+            raise credentials_exception
+        token_data = TokenData(username=username, role=role)  # noqa: F841
+    except JWTError:
+        raise credentials_exception
+    user = get_user(username)
+    if user is None:
+        raise credentials_exception
+    return user
+
+def require_role(*allowed_roles: Literal["utilisateur", "professeur"]):
+    # typing limitation in-edit; will validate at runtime
+    def _dep(user: UserInDB = Depends(get_current_user)):
+        if user.role not in allowed_roles:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return user
+    return _dep
+
+# Seed default users for convenience (dev only)
+if "admin" not in _users:
+    _users["admin"] = UserInDB(username="admin", role="professeur", hashed_password=get_password_hash("admin"))
+if "user" not in _users:
+    _users["user"] = UserInDB(username="user", role="utilisateur", hashed_password=get_password_hash("user"))
+
+# -----------------------
+# Auth routes
+# -----------------------
+@app.post("/api/auth/signup", response_model=User)
+def signup(req: SignupRequest):
+    if req.username in _users:
+        raise HTTPException(status_code=400, detail="Username already exists")
+    user = UserInDB(username=req.username, role=req.role, hashed_password=get_password_hash(req.password))
+    _users[req.username] = user
+    return User(username=user.username, role=user.role)
+
+@app.post("/api/auth/login", response_model=Token)
+def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    user = authenticate_user(form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(status_code=400, detail="Incorrect username or password")
+    access_token = create_access_token({"sub": user.username, "role": user.role})
+    return Token(access_token=access_token)
 
 # -----------------------
 # Utils parsing groupes
@@ -684,7 +800,7 @@ class PlanningAnalyzer:
 uploaded_csv, generated_planning = None, None
 
 @app.post("/api/upload_csv")
-async def upload_csv(file: UploadFile = File(...)):
+async def upload_csv(file: UploadFile = File(...), user: UserInDB = Depends(get_current_user)):
     global uploaded_csv
     content = await file.read()
     decoded=content.decode("utf-8")
@@ -694,7 +810,7 @@ async def upload_csv(file: UploadFile = File(...)):
     return {"header":rows[0],"preview":rows[1:6]}
 
 @app.post("/api/generate_planning")
-async def generate_planning():
+async def generate_planning(user: UserInDB = Depends(get_current_user)):
     global uploaded_csv, generated_planning
     if not uploaded_csv: 
         return JSONResponse(status_code=400, content={"error":"Aucun fichier CSV uploadé."})
@@ -727,7 +843,7 @@ async def generate_planning():
     }
 
 @app.post("/api/analyse_planning")
-async def analyse_planning(file: UploadFile = File(...)):
+async def analyse_planning(file: UploadFile = File(...), user: UserInDB = Depends(get_current_user)):
     """
     Attend un upload CSV via form-data: clé "file"
     """
@@ -769,7 +885,7 @@ async def analyse_planning(file: UploadFile = File(...)):
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @app.get("/api/analyse_planning_generated")
-def analyse_planning_generated():
+def analyse_planning_generated(user: UserInDB = Depends(get_current_user)):
     """
     Analyse le planning généré en mémoire (sans upload de fichier)
     """
@@ -811,7 +927,7 @@ def analyse_planning_generated():
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @app.get("/api/get_groups")
-def get_groups():
+def get_groups(user: UserInDB = Depends(get_current_user)):
     global generated_planning
     if not generated_planning: 
         return JSONResponse(status_code=400, content={"error":"Aucun planning généré."})
@@ -820,7 +936,7 @@ def get_groups():
     return {"groups":analyzer.groups}
 
 @app.get("/api/group_details/{groupe_id}")
-def group_details(groupe_id: int):
+def group_details(groupe_id: int, user: UserInDB = Depends(get_current_user)):
     global generated_planning
     if not generated_planning:
         return JSONResponse(status_code=400, content={"error": "Aucun planning généré."})
@@ -871,7 +987,7 @@ def group_details(groupe_id: int):
         )
 
 @app.get("/api/download_planning")
-async def download_planning(format: str = Query("csv", enum=["csv", "excel"])):
+async def download_planning(format: str = Query("csv", enum=["csv", "excel"]), user: UserInDB = Depends(get_current_user)):
     global generated_planning
     if not generated_planning:
         return JSONResponse(status_code=400, content={"error": "Aucun planning généré."})
@@ -895,7 +1011,7 @@ async def download_planning(format: str = Query("csv", enum=["csv", "excel"])):
         )
 
 @app.post("/api/generate_from_form")
-async def generate_from_form(form_data: dict):
+async def generate_from_form(form_data: dict, user: UserInDB = Depends(get_current_user)):
     """
     Génère un planning à partir des données du formulaire de saisie
     """
