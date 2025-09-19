@@ -1,3 +1,12 @@
+import React, { useEffect, useState } from 'react';
+import { useAuth } from '../AuthContext';
+
+export default function MonProfil() {
+  const { token, user } = useAuth();
+  const [profil, setProfil] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
   const [newPassword, setNewPassword] = useState("");
   const [passwordMsg, setPasswordMsg] = useState("");
   const handlePasswordChange = async () => {
@@ -19,15 +28,6 @@
       setPasswordMsg(e.message || 'Erreur');
     }
   };
-import React, { useEffect, useState } from 'react';
-import { useAuth } from '../AuthContext';
-
-export default function MonProfil() {
-  const { token, user } = useAuth();
-  const [profil, setProfil] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
 
   const load = async () => {
     setLoading(true);

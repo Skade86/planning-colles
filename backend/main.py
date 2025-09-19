@@ -1,4 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, Query
+from contextlib import asynccontextmanager
 from fastapi import Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -18,7 +19,39 @@ from dotenv import load_dotenv
 from pymongo import MongoClient
 from bson import ObjectId
 
-app = FastAPI()
+
+# Utilisation du nouveau système lifespan pour l'init MongoDB
+@asynccontextmanager
+async def lifespan(app):
+    global mongo_client, db
+    mongo_client = MongoClient(MONGODB_URI)
+    db = mongo_client[MONGODB_DB]
+    # Indexes utiles
+    db.users.create_index("email", unique=True)
+    # Seed utilisateurs de démo si absents
+    if db.users.count_documents({"email": "admin@demo.fr"}) == 0:
+        db.users.insert_one({
+            "email": "admin@demo.fr",
+            "nom": "Admin",
+            "role": "professeur",
+            "hashed_password": get_password_hash("admin"),
+            "created_at": datetime.now(timezone.utc),
+            "classes": ['PSIE'],
+            'lycee': 'Lycée Camille Guérin'
+        })
+    if db.users.count_documents({"email": "user@demo.fr"}) == 0:
+        db.users.insert_one({
+            "email": "user@demo.fr",
+            "nom": "Utilisateur",
+            "role": "utilisateur",
+            "hashed_password": get_password_hash("user"),
+            "created_at": datetime.now(timezone.utc),
+            "classes": ['PSIE'],
+            'lycee': 'Lycée Camille Guérin'
+        })
+    yield
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -72,34 +105,6 @@ MONGODB_DB = os.getenv("MONGODB_DB")
 mongo_client: Optional[MongoClient] = None
 db = None
 
-@app.on_event("startup")
-async def _startup_db():
-    global mongo_client, db
-    mongo_client = MongoClient(MONGODB_URI)
-    db = mongo_client[MONGODB_DB]
-    # Indexes utiles
-    db.users.create_index("email", unique=True)
-    # Seed utilisateurs de démo si absents
-    if db.users.count_documents({"email": "admin@demo.fr"}) == 0:
-        db.users.insert_one({
-            "email": "admin@demo.fr",
-            "nom": "Admin",
-            "role": "professeur",
-            "hashed_password": get_password_hash("admin"),
-            "created_at": datetime.now(timezone.utc),
-            "classes": ['PSIE'],
-            'lycee': 'Lycée Camille Guérin'
-        })
-    if db.users.count_documents({"email": "user@demo.fr"}) == 0:
-        db.users.insert_one({
-            "email": "user@demo.fr",
-            "nom": "Utilisateur",
-            "role": "utilisateur",
-            "hashed_password": get_password_hash("user"),
-            "created_at": datetime.now(timezone.utc),
-            "classes": ['PSIE'],
-            'lycee': 'Lycée Camille Guérin'
-        })
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
