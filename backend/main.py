@@ -22,7 +22,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -48,19 +48,20 @@ class TokenData(BaseModel):
     role: Optional[Literal["utilisateur", "professeur"]] = None
 
 class User(BaseModel):
-    username: str
+    email: str
+    nom: Optional[str] = None
     role: Literal["utilisateur", "professeur"] = "utilisateur"
 
 class UserInDB(User):
     hashed_password: str
 
 class SignupRequest(BaseModel):
-    username: str
+    email: str
     password: str
-    role: Literal["utilisateur", "professeur"] = "utilisateur"
-    # Champs optionnels à la création
-    email: Optional[str] = None
     nom: Optional[str] = None
+    role: Literal["utilisateur", "professeur"] = "utilisateur"
+    lycee: str
+    classes: list[str]
 
 # -----------------------
 # MongoDB setup
@@ -77,29 +78,25 @@ async def _startup_db():
     mongo_client = MongoClient(MONGODB_URI)
     db = mongo_client[MONGODB_DB]
     # Indexes utiles
-    db.users.create_index("username", unique=True)
-    # Index email (optionnel, non unique par défaut)
-    db.users.create_index("email")
+    db.users.create_index("email", unique=True)
     # Seed utilisateurs de démo si absents
-    if db.users.count_documents({"username": "admin"}) == 0:
+    if db.users.count_documents({"email": "admin@demo.fr"}) == 0:
         db.users.insert_one({
-            "username": "admin",
+            "email": "admin@demo.fr",
+            "nom": "Admin",
             "role": "professeur",
             "hashed_password": get_password_hash("admin"),
             "created_at": datetime.now(timezone.utc),
-            "email": None,
-            "nom": "Admin",
             "classes": ['PSIE'],
             'lycee': 'Lycée Camille Guérin'
         })
-    if db.users.count_documents({"username": "user"}) == 0:
+    if db.users.count_documents({"email": "user@demo.fr"}) == 0:
         db.users.insert_one({
-            "username": "user",
+            "email": "user@demo.fr",
+            "nom": "Utilisateur",
             "role": "utilisateur",
             "hashed_password": get_password_hash("user"),
             "created_at": datetime.now(timezone.utc),
-            "email": None,
-            "nom": "Utilisateur",
             "classes": ['PSIE'],
             'lycee': 'Lycée Camille Guérin'
         })
@@ -119,10 +116,10 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 async def get_user(username: str) -> Optional[UserInDB]:
     if db is None:
         return None
-    doc = db.users.find_one({"username": username})
+    doc = db.users.find_one({"email": username})
     if not doc:
         return None
-    return UserInDB(username=doc["username"], role=doc.get("role", "utilisateur"), hashed_password=doc["hashed_password"])
+    return UserInDB(email=doc["email"], nom=doc.get("nom"), role=doc.get("role", "utilisateur"), hashed_password=doc["hashed_password"])
 
 async def authenticate_user(username: str, password: str) -> Optional[UserInDB]:
     user = await get_user(username)
@@ -166,27 +163,28 @@ def require_role(*allowed_roles: Literal["utilisateur", "professeur"]):
 async def signup(req: SignupRequest):
     if db is None:
         raise HTTPException(status_code=500, detail="Database not initialized")
-    exists = db.users.find_one({"username": req.username})
+    exists = db.users.find_one({"email": req.email})
     if exists:
-        raise HTTPException(status_code=400, detail="Username already exists")
+        raise HTTPException(status_code=400, detail="Email already exists")
+    if not req.lycee or not req.classes or len(req.classes) == 0:
+        raise HTTPException(status_code=400, detail="Lycée et au moins une classe sont obligatoires")
     db.users.insert_one({
-        "username": req.username,
+        "email": req.email,
+        "nom": req.nom,
         "role": req.role,
         "hashed_password": get_password_hash(req.password),
         "created_at": datetime.now(timezone.utc),
-        "email": req.email,
-        "nom": req.nom,
-        "classes": [],
-        "lycee": ''
+        "classes": req.classes,
+        "lycee": req.lycee
     })
-    return User(username=req.username, role=req.role)
+    return User(email=req.email, nom=req.nom, role=req.role)
 
 @app.post("/api/auth/login", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     user = await authenticate_user(form_data.username, form_data.password)
     if not user:
         raise HTTPException(status_code=400, detail="Incorrect username or password")
-    access_token = create_access_token({"sub": user.username, "role": user.role})
+    access_token = create_access_token({"sub": user.email, "role": user.role})
     return Token(access_token=access_token)
 
 # -----------------------
@@ -197,19 +195,19 @@ class UserProfile(BaseModel):
     email: Optional[str] = None
     nom: Optional[str] = None
     classes: Optional[list[str]] = None
+    lycee: Optional[str] = None
 
 @app.get("/api/users/me")
 async def get_me(user: UserInDB = Depends(get_current_user)):
     if db is None:
         return JSONResponse(status_code=500, content={"error": "Base de données non initialisée"})
-    d = db.users.find_one({"username": user.username})
+    d = db.users.find_one({"email": user.email})
     if not d:
         return JSONResponse(status_code=404, content={"error": "Utilisateur introuvable"})
     return {
-        "username": d["username"],
-        "role": d.get("role"),
-        "email": d.get("email"),
+        "email": d["email"],
         "nom": d.get("nom"),
+        "role": d.get("role"),
         "classes": d.get("classes", []),
         "matieres": d.get("matieres", []),
         "lycee": d.get("lycee")
@@ -222,7 +220,7 @@ async def update_me(payload: UserProfile, user: UserInDB = Depends(get_current_u
     update_doc = {k: v for k, v in payload.dict().items() if v is not None}
     if not update_doc:
         return {"updated": False}
-    db.users.update_one({"username": user.username}, {"$set": update_doc})
+    db.users.update_one({"email": user.email}, {"$set": update_doc})
     return {"updated": True}
 
 # -----------------------
@@ -1225,7 +1223,7 @@ async def save_planning(name: str = Query(None), user: UserInDB = Depends(get_cu
 
     now = datetime.now(timezone.utc)
     doc = {
-        "user": user.username,
+        "user": user.email,
         "name": name or f"Planning {now.date().isoformat()} {now.strftime('%H:%M')}",
         "created_at": now,
         "csv_content": generated_planning,
@@ -1237,8 +1235,19 @@ async def save_planning(name: str = Query(None), user: UserInDB = Depends(get_cu
 async def list_plannings(user: UserInDB = Depends(get_current_user)):
     if db is None:
         return JSONResponse(status_code=500, content={"error": "Base de données non initialisée"})
-    # Pour la démo: on liste tous. Pour restreindre à l'utilisateur: filter = {"user": user.username}
-    cursor = db.plannings.find({}, {"csv_content": 0}).sort("created_at", -1)
+    # On récupère les emails des users du même lycée et ayant au moins une classe en commun
+    user_doc = db.users.find_one({"email": user.email})
+    if not user_doc:
+        return JSONResponse(status_code=404, content={"error": "Utilisateur introuvable"})
+    user_classes = set(user_doc.get("classes", []))
+    user_lycee = user_doc.get("lycee", "")
+    # Trouver tous les utilisateurs du même lycée et au moins une classe en commun
+    allowed_users = set()
+    for u in db.users.find({"lycee": user_lycee}):
+        classes = set(u.get("classes", []))
+        if user_classes & classes:
+            allowed_users.add(u["email"])
+    cursor = db.plannings.find({"user": {"$in": list(allowed_users)}}, {"csv_content": 0}).sort("created_at", -1)
     items = []
     for d in cursor:
         items.append({
@@ -1256,6 +1265,19 @@ async def get_planning(planning_id: str, user: UserInDB = Depends(get_current_us
     d = db.plannings.find_one({"_id": _safe_object_id(planning_id)})
     if not d:
         return JSONResponse(status_code=404, content={"error": "Planning introuvable"})
+    # Restriction d'accès : même lycée ET au moins une classe en commun
+    user_doc = db.users.find_one({"email": user.email})
+    if not user_doc:
+        return JSONResponse(status_code=404, content={"error": "Utilisateur introuvable"})
+    user_classes = set(user_doc.get("classes", []))
+    user_lycee = user_doc.get("lycee", "")
+    owner_doc = db.users.find_one({"email": d.get("user")})
+    if not owner_doc:
+        return JSONResponse(status_code=404, content={"error": "Auteur du planning introuvable"})
+    owner_classes = set(owner_doc.get("classes", []))
+    owner_lycee = owner_doc.get("lycee", "")
+    if user_lycee != owner_lycee or not (user_classes & owner_classes):
+        return JSONResponse(status_code=403, content={"error": "Accès refusé à ce planning"})
     df = pd.read_csv(io.StringIO(d.get("csv_content", "")), sep=';')
     return {"id": planning_id, "name": d.get("name"), "header": df.columns.tolist(), "rows": df.values.tolist()}
 
@@ -1266,6 +1288,19 @@ async def download_saved_planning(planning_id: str, format: str = Query("csv", e
     d = db.plannings.find_one({"_id": _safe_object_id(planning_id)})
     if not d:
         return JSONResponse(status_code=404, content={"error": "Planning introuvable"})
+    # Restriction d'accès : même lycée ET au moins une classe en commun
+    user_doc = db.users.find_one({"email": user.email})
+    if not user_doc:
+        return JSONResponse(status_code=404, content={"error": "Utilisateur introuvable"})
+    user_classes = set(user_doc.get("classes", []))
+    user_lycee = user_doc.get("lycee", "")
+    owner_doc = db.users.find_one({"email": d.get("user")})
+    if not owner_doc:
+        return JSONResponse(status_code=404, content={"error": "Auteur du planning introuvable"})
+    owner_classes = set(owner_doc.get("classes", []))
+    owner_lycee = owner_doc.get("lycee", "")
+    if user_lycee != owner_lycee or not (user_classes & owner_classes):
+        return JSONResponse(status_code=403, content={"error": "Accès refusé à ce planning"})
     csv_content = d.get("csv_content", "")
     if format == "excel":
         df = pd.read_csv(io.StringIO(csv_content), sep=';')
@@ -1282,3 +1317,18 @@ async def download_saved_planning(planning_id: str, format: str = Query("csv", e
             media_type="text/csv",
             headers={"Content-Disposition": f"attachment; filename={d.get('name','planning')}.csv"}
         )
+
+# --- Changement de mot de passe utilisateur ---
+from pydantic import BaseModel as PydanticBaseModel
+
+class PasswordChangeRequest(PydanticBaseModel):
+    password: str
+
+@app.put("/api/users/me/password")
+async def change_password(payload: PasswordChangeRequest, user: UserInDB = Depends(get_current_user)):
+    if db is None:
+        return JSONResponse(status_code=500, content={"error": "Base de données non initialisée"})
+    if not payload.password or len(payload.password) < 4:
+        return JSONResponse(status_code=400, content={"error": "Mot de passe trop court"})
+    db.users.update_one({"email": user.email}, {"$set": {"hashed_password": get_password_hash(payload.password)}})
+    return {"updated": True}

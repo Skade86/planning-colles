@@ -1,3 +1,24 @@
+  const [newPassword, setNewPassword] = useState("");
+  const [passwordMsg, setPasswordMsg] = useState("");
+  const handlePasswordChange = async () => {
+    setPasswordMsg("");
+    if (!newPassword.trim()) {
+      setPasswordMsg("Veuillez saisir un nouveau mot de passe.");
+      return;
+    }
+    try {
+      const res = await fetch('http://localhost:8000/api/users/me/password', {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: newPassword })
+      });
+      if (!res.ok) throw new Error('Changement impossible');
+      setPasswordMsg('Mot de passe modifié !');
+      setNewPassword("");
+    } catch (e) {
+      setPasswordMsg(e.message || 'Erreur');
+    }
+  };
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../AuthContext';
 
@@ -21,9 +42,7 @@ export default function MonProfil() {
         email: data.email || '',
         nom: data.nom || '',
         classes: (data.classes || []).join(', '),
-        matieres: (data.matieres || []).join(', '),
-        paires: data.disponibilites?.paires ?? true,
-        impaires: data.disponibilites?.impaires ?? true,
+        lycee: data.lycee || '',
       });
     } catch (e) {
       setError(e.message || 'Erreur');
@@ -42,8 +61,7 @@ export default function MonProfil() {
         email: profil.email,
         nom: profil.nom,
         classes: profil.classes.split(',').map(s => s.trim()).filter(Boolean),
-        matieres: profil.matieres.split(',').map(s => s.trim()).filter(Boolean),
-        disponibilites: { paires: !!profil.paires, impaires: !!profil.impaires }
+        lycee: profil.lycee,
       };
       const res = await fetch('http://localhost:8000/api/users/me', {
         method: 'PUT',
@@ -76,22 +94,23 @@ export default function MonProfil() {
         <input type="email" className="form-control" value={profil.email} onChange={e => setProfil({ ...profil, email: e.target.value })} />
       </div>
       <div className="mb-3">
+        <label className="form-label">Lycée</label>
+        <input className="form-control" value={profil.lycee} onChange={e => setProfil({ ...profil, lycee: e.target.value })} />
+      </div>
+      <div className="mb-3">
         <label className="form-label">Classes (séparées par des virgules)</label>
         <input className="form-control" value={profil.classes} onChange={e => setProfil({ ...profil, classes: e.target.value })} />
       </div>
-      <div className="mb-3">
-        <label className="form-label">Matières (séparées par des virgules)</label>
-        <input className="form-control" value={profil.matieres} onChange={e => setProfil({ ...profil, matieres: e.target.value })} />
-      </div>
-      <div className="form-check mb-3">
-        <input id="paires" className="form-check-input" type="checkbox" checked={!!profil.paires} onChange={e => setProfil({ ...profil, paires: e.target.checked })} />
-        <label className="form-check-label" htmlFor="paires">Travaille les semaines paires</label>
-      </div>
-      <div className="form-check mb-3">
-        <input id="impaires" className="form-check-input" type="checkbox" checked={!!profil.impaires} onChange={e => setProfil({ ...profil, impaires: e.target.checked })} />
-        <label className="form-check-label" htmlFor="impaires">Travaille les semaines impaires</label>
-      </div>
+      {/* Champs matières et disponibilités supprimés car non présents dans le schéma backend */}
       <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button>
+
+      <hr />
+      <h5>Changer le mot de passe</h5>
+      <div className="mb-3">
+        <input type="password" className="form-control" placeholder="Nouveau mot de passe" value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+      </div>
+      <button className="btn btn-secondary" type="button" onClick={handlePasswordChange}>Changer le mot de passe</button>
+      {passwordMsg && <div className="mt-2">{passwordMsg}</div>}
     </div>
   );
 }
