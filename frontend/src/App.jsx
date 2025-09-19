@@ -7,6 +7,9 @@ import AnalysePage from './components/AnalysePage';
 import GroupeDetails from './components/GroupeDetails';
 import SaisiePage from './components/SaisiePage';
 import FormatToggle from './components/FormatToggle';
+import SavePlanningButton from './components/SavePlanningButton';
+import MesPlannings from './components/MesPlannings';
+import MonProfil from './components/MonProfil';
 import { Navbar, Nav, Container } from "react-bootstrap";
 import Form from 'react-bootstrap/Form';  // 👉 à ajouter en haut
 import './App.css';
@@ -60,6 +63,8 @@ function App() {
                 <Nav.Link eventKey="saisie">Saisie</Nav.Link>
                 <Nav.Link eventKey="planning">Planning</Nav.Link>
                 <Nav.Link eventKey="analyse">Analyse</Nav.Link>
+                <Nav.Link eventKey="mesplannings">Mes plannings</Nav.Link>
+                <Nav.Link eventKey="profil">Mon profil</Nav.Link>
                 <Nav.Link eventKey="groupe">Détail groupe</Nav.Link>
               </Nav>
               <div className="text-white me-3 d-flex align-items-center">
@@ -103,6 +108,7 @@ function App() {
             {isAuthenticated && (
               <div className="d-flex flex-wrap gap-2 mt-2">
                 <GenerateButton setPlanning={setPlanning} setStatus={setStatus} />
+                <SavePlanningButton defaultName={"Planning"} onSaved={() => {}} />
               </div>
             )}
 
@@ -154,6 +160,16 @@ function App() {
               </>
             )}
           </div>
+        )}
+
+        {/* Page Mes Plannings */}
+        {currentPage === 'mesplannings' && (
+          isAuthenticated ? <MesPlannings /> : <Login />
+        )}
+
+        {/* Page Mon Profil */}
+        {currentPage === 'profil' && (
+          isAuthenticated ? <MonProfil /> : <Login />
         )}
       </main>
     </div>

@@ -13,6 +13,10 @@ from typing import Optional, Literal
 from pydantic import BaseModel
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+import os
+from dotenv import load_dotenv
+from pymongo import MongoClient
+from bson import ObjectId
 
 app = FastAPI()
 
@@ -27,7 +31,8 @@ app.add_middleware(
 # -----------------------
 # Auth settings & models
 # -----------------------
-SECRET_KEY = "change-me-in-env"
+load_dotenv()
+SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 8
 
@@ -53,9 +58,51 @@ class SignupRequest(BaseModel):
     username: str
     password: str
     role: Literal["utilisateur", "professeur"] = "utilisateur"
+    # Champs optionnels à la création
+    email: Optional[str] = None
+    nom: Optional[str] = None
 
-# In-memory users DB (replace with real DB later)
-_users: dict[str, UserInDB] = {}
+# -----------------------
+# MongoDB setup
+# -----------------------
+MONGODB_URI = os.getenv("MONGODB_URI")
+MONGODB_DB = os.getenv("MONGODB_DB")
+
+mongo_client: Optional[MongoClient] = None
+db = None
+
+@app.on_event("startup")
+async def _startup_db():
+    global mongo_client, db
+    mongo_client = MongoClient(MONGODB_URI)
+    db = mongo_client[MONGODB_DB]
+    # Indexes utiles
+    db.users.create_index("username", unique=True)
+    # Index email (optionnel, non unique par défaut)
+    db.users.create_index("email")
+    # Seed utilisateurs de démo si absents
+    if db.users.count_documents({"username": "admin"}) == 0:
+        db.users.insert_one({
+            "username": "admin",
+            "role": "professeur",
+            "hashed_password": get_password_hash("admin"),
+            "created_at": datetime.now(timezone.utc),
+            "email": None,
+            "nom": "Admin",
+            "classes": ['PSIE'],
+            'lycee': 'Lycée Camille Guérin'
+        })
+    if db.users.count_documents({"username": "user"}) == 0:
+        db.users.insert_one({
+            "username": "user",
+            "role": "utilisateur",
+            "hashed_password": get_password_hash("user"),
+            "created_at": datetime.now(timezone.utc),
+            "email": None,
+            "nom": "Utilisateur",
+            "classes": ['PSIE'],
+            'lycee': 'Lycée Camille Guérin'
+        })
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
@@ -69,11 +116,16 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-def get_user(username: str) -> Optional[UserInDB]:
-    return _users.get(username)
+async def get_user(username: str) -> Optional[UserInDB]:
+    if db is None:
+        return None
+    doc = db.users.find_one({"username": username})
+    if not doc:
+        return None
+    return UserInDB(username=doc["username"], role=doc.get("role", "utilisateur"), hashed_password=doc["hashed_password"])
 
-def authenticate_user(username: str, password: str) -> Optional[UserInDB]:
-    user = get_user(username)
+async def authenticate_user(username: str, password: str) -> Optional[UserInDB]:
+    user = await get_user(username)
     if not user:
         return None
     if not verify_password(password, user.hashed_password):
@@ -95,43 +147,83 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> UserInDB:
         token_data = TokenData(username=username, role=role)  # noqa: F841
     except JWTError:
         raise credentials_exception
-    user = get_user(username)
+    user = await get_user(username)
     if user is None:
         raise credentials_exception
     return user
 
 def require_role(*allowed_roles: Literal["utilisateur", "professeur"]):
-    # typing limitation in-edit; will validate at runtime
     def _dep(user: UserInDB = Depends(get_current_user)):
         if user.role not in allowed_roles:
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         return user
     return _dep
 
-# Seed default users for convenience (dev only)
-if "admin" not in _users:
-    _users["admin"] = UserInDB(username="admin", role="professeur", hashed_password=get_password_hash("admin"))
-if "user" not in _users:
-    _users["user"] = UserInDB(username="user", role="utilisateur", hashed_password=get_password_hash("user"))
-
 # -----------------------
 # Auth routes
 # -----------------------
 @app.post("/api/auth/signup", response_model=User)
-def signup(req: SignupRequest):
-    if req.username in _users:
+async def signup(req: SignupRequest):
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not initialized")
+    exists = db.users.find_one({"username": req.username})
+    if exists:
         raise HTTPException(status_code=400, detail="Username already exists")
-    user = UserInDB(username=req.username, role=req.role, hashed_password=get_password_hash(req.password))
-    _users[req.username] = user
-    return User(username=user.username, role=user.role)
+    db.users.insert_one({
+        "username": req.username,
+        "role": req.role,
+        "hashed_password": get_password_hash(req.password),
+        "created_at": datetime.now(timezone.utc),
+        "email": req.email,
+        "nom": req.nom,
+        "classes": [],
+        "lycee": ''
+    })
+    return User(username=req.username, role=req.role)
 
 @app.post("/api/auth/login", response_model=Token)
-def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    user = authenticate_user(form_data.username, form_data.password)
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    user = await authenticate_user(form_data.username, form_data.password)
     if not user:
         raise HTTPException(status_code=400, detail="Incorrect username or password")
     access_token = create_access_token({"sub": user.username, "role": user.role})
     return Token(access_token=access_token)
+
+# -----------------------
+# Profil utilisateur (lecture / mise à jour)
+# -----------------------
+
+class UserProfile(BaseModel):
+    email: Optional[str] = None
+    nom: Optional[str] = None
+    classes: Optional[list[str]] = None
+
+@app.get("/api/users/me")
+async def get_me(user: UserInDB = Depends(get_current_user)):
+    if db is None:
+        return JSONResponse(status_code=500, content={"error": "Base de données non initialisée"})
+    d = db.users.find_one({"username": user.username})
+    if not d:
+        return JSONResponse(status_code=404, content={"error": "Utilisateur introuvable"})
+    return {
+        "username": d["username"],
+        "role": d.get("role"),
+        "email": d.get("email"),
+        "nom": d.get("nom"),
+        "classes": d.get("classes", []),
+        "matieres": d.get("matieres", []),
+        "lycee": d.get("lycee")
+    }
+
+@app.put("/api/users/me")
+async def update_me(payload: UserProfile, user: UserInDB = Depends(get_current_user)):
+    if db is None:
+        return JSONResponse(status_code=500, content={"error": "Base de données non initialisée"})
+    update_doc = {k: v for k, v in payload.dict().items() if v is not None}
+    if not update_doc:
+        return {"updated": False}
+    db.users.update_one({"username": user.username}, {"$set": update_doc})
+    return {"updated": True}
 
 # -----------------------
 # Utils parsing groupes
@@ -1112,3 +1204,81 @@ def convert_form_to_csv(form_data):
 @app.get("/api/hello")
 def hello():
     return {"message":"Backend Planning Colles avec OR-Tools (semaines dynamiques)"}
+
+# -----------------------
+# Persistence des plannings (MongoDB)
+# -----------------------
+
+def _safe_object_id(oid: str) -> ObjectId:
+    try:
+        return ObjectId(oid)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Identifiant invalide")
+
+@app.post("/api/plannings/save")
+async def save_planning(name: str = Query(None), user: UserInDB = Depends(get_current_user)):
+    global generated_planning
+    if db is None:
+        return JSONResponse(status_code=500, content={"error": "Base de données non initialisée"})
+    if not generated_planning:
+        return JSONResponse(status_code=400, content={"error": "Aucun planning généré à sauvegarder"})
+
+    now = datetime.now(timezone.utc)
+    doc = {
+        "user": user.username,
+        "name": name or f"Planning {now.date().isoformat()} {now.strftime('%H:%M')}",
+        "created_at": now,
+        "csv_content": generated_planning,
+    }
+    res = db.plannings.insert_one(doc)
+    return {"id": str(res.inserted_id), "name": doc["name"], "created_at": doc["created_at"].isoformat()}
+
+@app.get("/api/plannings")
+async def list_plannings(user: UserInDB = Depends(get_current_user)):
+    if db is None:
+        return JSONResponse(status_code=500, content={"error": "Base de données non initialisée"})
+    # Pour la démo: on liste tous. Pour restreindre à l'utilisateur: filter = {"user": user.username}
+    cursor = db.plannings.find({}, {"csv_content": 0}).sort("created_at", -1)
+    items = []
+    for d in cursor:
+        items.append({
+            "id": str(d["_id"]),
+            "name": d.get("name", "Planning"),
+            "user": d.get("user", ""),
+            "created_at": d.get("created_at").isoformat() if d.get("created_at") else None,
+        })
+    return {"items": items}
+
+@app.get("/api/plannings/{planning_id}")
+async def get_planning(planning_id: str, user: UserInDB = Depends(get_current_user)):
+    if db is None:
+        return JSONResponse(status_code=500, content={"error": "Base de données non initialisée"})
+    d = db.plannings.find_one({"_id": _safe_object_id(planning_id)})
+    if not d:
+        return JSONResponse(status_code=404, content={"error": "Planning introuvable"})
+    df = pd.read_csv(io.StringIO(d.get("csv_content", "")), sep=';')
+    return {"id": planning_id, "name": d.get("name"), "header": df.columns.tolist(), "rows": df.values.tolist()}
+
+@app.get("/api/plannings/{planning_id}/download")
+async def download_saved_planning(planning_id: str, format: str = Query("csv", enum=["csv", "excel"]), user: UserInDB = Depends(get_current_user)):
+    if db is None:
+        return JSONResponse(status_code=500, content={"error": "Base de données non initialisée"})
+    d = db.plannings.find_one({"_id": _safe_object_id(planning_id)})
+    if not d:
+        return JSONResponse(status_code=404, content={"error": "Planning introuvable"})
+    csv_content = d.get("csv_content", "")
+    if format == "excel":
+        df = pd.read_csv(io.StringIO(csv_content), sep=';')
+        out = export_excel_with_style(df)
+        out.seek(0)
+        return StreamingResponse(
+            out,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={d.get('name','planning')}.xlsx"}
+        )
+    else:
+        return StreamingResponse(
+            io.StringIO(csv_content),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={d.get('name','planning')}.csv"}
+        )
