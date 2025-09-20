@@ -1,3 +1,4 @@
+const BASE_URL = import.meta.env.VITE_API_URL;
 import React from 'react';
 import Button from 'react-bootstrap/Button';
 import { useAuth } from '../AuthContext';
@@ -7,7 +8,6 @@ function GenerateButton({ setPlanning, setStatus }) {
   const handleGenerate = async () => {
     setStatus({ type: 'info', text: 'Génération du planning...' });
     try {
-  const BASE_URL = process.env.REACT_APP_API_URL;
   const res = await fetch(`${BASE_URL}/api/generate_planning`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },

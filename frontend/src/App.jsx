@@ -1,3 +1,4 @@
+const BASE_URL = import.meta.env.VITE_API_URL;
 import React, { useState, useEffect } from 'react';
 import FileUpload from './components/FileUpload';
 import PlanningTable from './components/PlanningTable';
@@ -33,7 +34,6 @@ function App() {
   // Charger la liste des groupes après génération d'un planning
   useEffect(() => {
     if (planning) {
-  const BASE_URL = process.env.REACT_APP_API_URL;
   fetch(`${BASE_URL}/api/get_groups`, {
         headers: user ? { 'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}` } : {}
       })

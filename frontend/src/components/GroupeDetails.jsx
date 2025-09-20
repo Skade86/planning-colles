@@ -1,3 +1,4 @@
+const BASE_URL = import.meta.env.VITE_API_URL;
 import React, { useEffect, useState } from "react";
 import { useAuth } from "../AuthContext";
 
@@ -12,9 +13,7 @@ export default function GroupeDetails({ groupId }) {
     setLoading(true);
     setDetails(null);
     setError(null);
-
-  const BASE_URL = process.env.REACT_APP_API_URL;
-  fetch(`${BASE_URL}/api/group_details/${groupId}`, {
+    fetch(`${BASE_URL}/api/group_details/${groupId}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     })
       .then((res) => {

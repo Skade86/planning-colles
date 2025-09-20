@@ -1,3 +1,4 @@
+const BASE_URL = import.meta.env.VITE_API_URL;
 // src/components/DownloadButton.js
 import React from 'react';
 import Button from 'react-bootstrap/Button';
@@ -7,7 +8,6 @@ function DownloadButton({ format = 'csv' }) {
   const { token } = useAuth();
   const handleDownload = async () => {
     try {
-  const BASE_URL = process.env.REACT_APP_API_URL;
   const res = await fetch(`${BASE_URL}/api/download_planning?format=${format}`, {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${token}` },

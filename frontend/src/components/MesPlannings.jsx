@@ -1,3 +1,4 @@
+const BASE_URL = import.meta.env.VITE_API_URL;
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../AuthContext';
 
@@ -11,7 +12,6 @@ export default function MesPlannings() {
     setLoading(true);
     setError('');
     try {
-  const BASE_URL = process.env.REACT_APP_API_URL;
   const res = await fetch(`${BASE_URL}/api/plannings`, { headers: { 'Authorization': `Bearer ${token}` } });
       if (!res.ok) throw new Error('Erreur serveur');
       const data = await res.json();
@@ -23,7 +23,7 @@ export default function MesPlannings() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [token]);
 
   return (
     <div style={{ padding: '1rem' }}>

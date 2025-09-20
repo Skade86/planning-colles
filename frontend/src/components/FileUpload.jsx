@@ -1,3 +1,4 @@
+const BASE_URL = import.meta.env.VITE_API_URL;
 import React, { useRef, useState } from 'react';
 import Form from 'react-bootstrap/Form';
 import Card from 'react-bootstrap/Card';
@@ -7,6 +8,7 @@ import { useAuth } from '../AuthContext';
 function FileUpload({ setPreview, setStatus }) {
   const { token } = useAuth();
   const fileInput = useRef();
+  // eslint-disable-next-line no-unused-vars
   const [fileSelected, setFileSelected] = useState(false);
 
   const handleUpload = async (e) => {
@@ -21,7 +23,6 @@ function FileUpload({ setPreview, setStatus }) {
     setFileSelected(true);
 
     try {
-  const BASE_URL = process.env.REACT_APP_API_URL;
   const res = await fetch(`${BASE_URL}/api/upload_csv`, {
         method: 'POST',
         body: formData,
@@ -33,9 +34,10 @@ function FileUpload({ setPreview, setStatus }) {
       setPreview(data);
       setStatus({ type: 'success', text: 'Fichier importé avec succès !' });
     } catch (error) {
+      console.log(error);
       setStatus({
         type: 'error',
-  text: `Erreur lors de l'import. Vérifiez que le backend tourne (${BASE_URL}).`
+        text: `Erreur lors de l'import. Vérifiez que le backend tourne (${BASE_URL}).`
       });
     }
   };
