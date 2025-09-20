@@ -1,3 +1,4 @@
+
 const BASE_URL = import.meta.env.VITE_API_URL;
 import React, { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '../AuthContext';
@@ -7,6 +8,27 @@ export default function MesPlannings() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  // Téléchargement sécurisé avec token
+  const handleDownload = async (id, format) => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/plannings/${id}/download?format=${format}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Erreur lors du téléchargement');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `planning_${id}.${format === 'csv' ? 'csv' : 'xlsx'}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      alert(e.message || 'Erreur lors du téléchargement');
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -48,8 +70,8 @@ export default function MesPlannings() {
                 <td>{it.created_at}</td>
                 <td>{it.user}</td>
                 <td>
-                  <a className="btn btn-sm btn-outline-primary me-2" href={`${BASE_URL}/api/plannings/${it.id}/download?format=csv`} target="_blank" rel="noreferrer" onClick={(e)=>{e.stopPropagation();}}>CSV</a>
-                  <a className="btn btn-sm btn-outline-success" href={`${BASE_URL}/api/plannings/${it.id}/download?format=excel`} target="_blank" rel="noreferrer" onClick={(e)=>{e.stopPropagation();}}>Excel</a>
+                  <button className="btn btn-sm btn-outline-primary me-2" onClick={() => handleDownload(it.id, 'csv')}>CSV</button>
+                  <button className="btn btn-sm btn-outline-success" onClick={() => handleDownload(it.id, 'excel')}>Excel</button>
                 </td>
               </tr>
             ))}
