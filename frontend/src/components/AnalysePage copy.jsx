@@ -14,7 +14,8 @@ function AnalysePage() {
     setAnalysisData(null);
 
     try {
-      const res = await fetch('http://localhost:8000/api/analyse_planning', { 
+  const BASE_URL = process.env.REACT_APP_API_URL;
+  const res = await fetch(`${BASE_URL}/api/analyse_planning`, {
         method: 'POST' 
       });
       const data = await res.json();
@@ -25,7 +26,7 @@ function AnalysePage() {
         setAnalysisData(data);
       }
     } catch (e) {
-      setError("Erreur de connexion au backend. Vérifiez qu'il est lancé sur localhost:8000");
+  setError(`Erreur de connexion au backend. Vérifiez qu'il est lancé sur ${BASE_URL}`);
       console.log(e.data);
     } finally {
       setLoading(false);

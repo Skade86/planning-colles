@@ -33,7 +33,8 @@ function App() {
   // Charger la liste des groupes après génération d'un planning
   useEffect(() => {
     if (planning) {
-      fetch("http://localhost:8000/api/get_groups", {
+  const BASE_URL = process.env.REACT_APP_API_URL;
+  fetch(`${BASE_URL}/api/get_groups`, {
         headers: user ? { 'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}` } : {}
       })
         .then((res) => res.json())
@@ -95,7 +96,7 @@ function App() {
             <p>
               Importez votre fichier CSV de créneaux, puis cliquez sur <b>Générer le planning</b>.<br />
               <span style={{ color: '#466089' }}>
-                Le backend doit être lancé sur <b>localhost:8000</b>.
+                Le backend doit être lancé sur <b>{BASE_URL}</b>.
               </span>
             </p>
             {isAuthenticated ? (

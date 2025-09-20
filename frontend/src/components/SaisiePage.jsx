@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Form, Button, Card, Row, Col, Alert } from 'react-bootstrap';
 
-const BASE_URL = "http://localhost:8000";
+const BASE_URL = process.env.REACT_APP_API_URL;
 
 export default function SaisiePage() {
   // État pour les données du formulaire

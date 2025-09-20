@@ -1,3 +1,4 @@
+const BASE_URL = process.env.REACT_APP_API_URL;
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../AuthContext';
 
@@ -16,7 +17,7 @@ export default function MonProfil() {
       return;
     }
     try {
-      const res = await fetch('http://localhost:8000/api/users/me/password', {
+      const res = await fetch(`${BASE_URL}/api/users/me/password`, {
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: newPassword })
@@ -33,7 +34,7 @@ export default function MonProfil() {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('http://localhost:8000/api/users/me', {
+      const res = await fetch(`${BASE_URL}/api/users/me`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (!res.ok) throw new Error('Erreur serveur');
@@ -64,7 +65,7 @@ export default function MonProfil() {
         classes: profil.classes.split(',').map(s => s.trim()).filter(Boolean),
         lycee: profil.lycee,
       };
-      const res = await fetch('http://localhost:8000/api/users/me', {
+      const res = await fetch(`${BASE_URL}/api/users/me`, {
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)

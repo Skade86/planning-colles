@@ -13,7 +13,8 @@ export default function GroupeDetails({ groupId }) {
     setDetails(null);
     setError(null);
 
-    fetch(`http://localhost:8000/api/group_details/${groupId}`, {
+  const BASE_URL = process.env.REACT_APP_API_URL;
+  fetch(`${BASE_URL}/api/group_details/${groupId}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     })
       .then((res) => {

@@ -7,7 +7,8 @@ function DownloadButton({ format = 'csv' }) {
   const { token } = useAuth();
   const handleDownload = async () => {
     try {
-      const res = await fetch(`http://localhost:8000/api/download_planning?format=${format}`, {
+  const BASE_URL = process.env.REACT_APP_API_URL;
+  const res = await fetch(`${BASE_URL}/api/download_planning?format=${format}`, {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${token}` },
       });

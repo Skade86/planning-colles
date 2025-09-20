@@ -11,7 +11,8 @@ export default function MesPlannings() {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('http://localhost:8000/api/plannings', { headers: { 'Authorization': `Bearer ${token}` } });
+  const BASE_URL = process.env.REACT_APP_API_URL;
+  const res = await fetch(`${BASE_URL}/api/plannings`, { headers: { 'Authorization': `Bearer ${token}` } });
       if (!res.ok) throw new Error('Erreur serveur');
       const data = await res.json();
       setItems(data.items || []);
@@ -47,8 +48,8 @@ export default function MesPlannings() {
                 <td>{it.created_at}</td>
                 <td>{it.user}</td>
                 <td>
-                  <a className="btn btn-sm btn-outline-primary me-2" href={`http://localhost:8000/api/plannings/${it.id}/download?format=csv`} target="_blank" rel="noreferrer" onClick={(e)=>{e.stopPropagation();}}>CSV</a>
-                  <a className="btn btn-sm btn-outline-success" href={`http://localhost:8000/api/plannings/${it.id}/download?format=excel`} target="_blank" rel="noreferrer" onClick={(e)=>{e.stopPropagation();}}>Excel</a>
+                  <a className="btn btn-sm btn-outline-primary me-2" href={`${BASE_URL}/api/plannings/${it.id}/download?format=csv`} target="_blank" rel="noreferrer" onClick={(e)=>{e.stopPropagation();}}>CSV</a>
+                  <a className="btn btn-sm btn-outline-success" href={`${BASE_URL}/api/plannings/${it.id}/download?format=excel`} target="_blank" rel="noreferrer" onClick={(e)=>{e.stopPropagation();}}>Excel</a>
                 </td>
               </tr>
             ))}

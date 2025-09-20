@@ -7,7 +7,8 @@ function GenerateButton({ setPlanning, setStatus }) {
   const handleGenerate = async () => {
     setStatus({ type: 'info', text: 'Génération du planning...' });
     try {
-      const res = await fetch('http://localhost:8000/api/generate_planning', {
+  const BASE_URL = process.env.REACT_APP_API_URL;
+  const res = await fetch(`${BASE_URL}/api/generate_planning`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
       });

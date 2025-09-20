@@ -21,7 +21,8 @@ function FileUpload({ setPreview, setStatus }) {
     setFileSelected(true);
 
     try {
-      const res = await fetch('http://localhost:8000/api/upload_csv', {
+  const BASE_URL = process.env.REACT_APP_API_URL;
+  const res = await fetch(`${BASE_URL}/api/upload_csv`, {
         method: 'POST',
         body: formData,
         headers: { 'Authorization': `Bearer ${token}` },
@@ -34,7 +35,7 @@ function FileUpload({ setPreview, setStatus }) {
     } catch (error) {
       setStatus({
         type: 'error',
-        text: "Erreur lors de l'import. Vérifiez que le backend tourne (http://localhost:8000)."
+  text: `Erreur lors de l'import. Vérifiez que le backend tourne (${BASE_URL}).`
       });
     }
   };
