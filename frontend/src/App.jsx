@@ -96,7 +96,7 @@ function App() {
             <p>
               Importez votre fichier CSV de créneaux, puis cliquez sur <b>Générer le planning</b>.<br />
               <span style={{ color: '#466089' }}>
-                Le backend doit être lancé sur <b>{BASE_URL}</b>.
+                Vous pouvez aussi entrer manuellement les créneaux dans l'onglet "Saisie".
               </span>
             </p>
             {isAuthenticated ? (
