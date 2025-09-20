@@ -1,5 +1,5 @@
 const BASE_URL = import.meta.env.VITE_API_URL;
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '../AuthContext';
 
 export default function MesPlannings() {
@@ -8,11 +8,11 @@ export default function MesPlannings() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-  const res = await fetch(`${BASE_URL}/api/plannings`, { headers: { 'Authorization': `Bearer ${token}` } });
+      const res = await fetch(`${BASE_URL}/api/plannings`, { headers: { 'Authorization': `Bearer ${token}` } });
       if (!res.ok) throw new Error('Erreur serveur');
       const data = await res.json();
       setItems(data.items || []);
@@ -21,9 +21,9 @@ export default function MesPlannings() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [token]);
 
-  useEffect(() => { load(); }, [token]);
+  useEffect(() => { load(); }, [load]);
 
   return (
     <div style={{ padding: '1rem' }}>

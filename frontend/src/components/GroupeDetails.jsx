@@ -1,5 +1,5 @@
 const BASE_URL = import.meta.env.VITE_API_URL;
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { useAuth } from "../AuthContext";
 
 export default function GroupeDetails({ groupId }) {
@@ -8,7 +8,7 @@ export default function GroupeDetails({ groupId }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (!groupId) return;
     setLoading(true);
     setDetails(null);
@@ -31,7 +31,11 @@ export default function GroupeDetails({ groupId }) {
         setError("Impossible de charger les détails du groupe.");
         setLoading(false);
       });
-  }, [groupId]);
+  }, [groupId, token]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   if (!groupId) {
     return <p>⚠️ Veuillez sélectionner un groupe pour voir ses détails.</p>;
