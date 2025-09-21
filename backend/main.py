@@ -16,39 +16,15 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 import os
 from dotenv import load_dotenv
-from pymongo import MongoClient
 from bson import ObjectId
+from backend.db import db, ensure_demo_users
 
 
 # Utilisation du nouveau système lifespan pour l'init MongoDB
 @asynccontextmanager
 async def lifespan(app):
-    global mongo_client, db
-    mongo_client = MongoClient(MONGODB_URI)
-    db = mongo_client[MONGODB_DB]
-    # Indexes utiles
-    db.users.create_index("email", unique=True)
-    # Seed utilisateurs de démo si absents
-    if db.users.count_documents({"email": "admin@demo.fr"}) == 0:
-        db.users.insert_one({
-            "email": "admin@demo.fr",
-            "nom": "Admin",
-            "role": "professeur",
-            "hashed_password": get_password_hash("admin"),
-            "created_at": datetime.now(timezone.utc),
-            "classes": ['PSIE'],
-            'lycee': 'Lycée Camille Guérin'
-        })
-    if db.users.count_documents({"email": "user@demo.fr"}) == 0:
-        db.users.insert_one({
-            "email": "user@demo.fr",
-            "nom": "Utilisateur",
-            "role": "utilisateur",
-            "hashed_password": get_password_hash("user"),
-            "created_at": datetime.now(timezone.utc),
-            "classes": ['PSIE'],
-            'lycee': 'Lycée Camille Guérin'
-        })
+    # Ensure demo users/indexes exist (db is initialized in db.py)
+    ensure_demo_users(get_password_hash)
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -102,8 +78,9 @@ class SignupRequest(BaseModel):
 MONGODB_URI = os.getenv("MONGODB_URI")
 MONGODB_DB = os.getenv("MONGODB_DB")
 
-mongo_client: Optional[MongoClient] = None
-db = None
+# `db` is provided by backend.db
+mongo_client = None
+# db variable imported from backend.db
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
