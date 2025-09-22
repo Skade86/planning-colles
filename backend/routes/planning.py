@@ -11,7 +11,6 @@ from utils import export_excel_with_style
 
 router = APIRouter()
 
-
 def _safe_object_id(oid: str) -> ObjectId:
 	try:
 		return ObjectId(oid)
