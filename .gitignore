@@ -74,3 +74,4 @@ uploads/
 .env.test.local
 .env.production.local
 *.pyc
+backend/__pycache__/main.cpython-313.pyc
