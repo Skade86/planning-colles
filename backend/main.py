@@ -28,27 +28,6 @@ async def lifespan(app):
     db = mongo_client[MONGODB_DB]
     # Indexes utiles
     db.users.create_index("email", unique=True)
-    # Seed utilisateurs de démo si absents
-    if db.users.count_documents({"email": "admin@demo.fr"}) == 0:
-        db.users.insert_one({
-            "email": "admin@demo.fr",
-            "nom": "Admin",
-            "role": "professeur",
-            "hashed_password": get_password_hash("admin"),
-            "created_at": datetime.now(timezone.utc),
-            "classes": ['PSIE'],
-            'lycee': 'Lycée Camille Guérin'
-        })
-    if db.users.count_documents({"email": "user@demo.fr"}) == 0:
-        db.users.insert_one({
-            "email": "user@demo.fr",
-            "nom": "Utilisateur",
-            "role": "utilisateur",
-            "hashed_password": get_password_hash("user"),
-            "created_at": datetime.now(timezone.utc),
-            "classes": ['PSIE'],
-            'lycee': 'Lycée Camille Guérin'
-        })
     yield
 
 app = FastAPI(lifespan=lifespan)

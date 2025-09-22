@@ -18,8 +18,8 @@ if (Test-Port 8000) {
     Write-Host "⚠️  Le port 8000 est déjà utilisé (backend)" -ForegroundColor Yellow
 }
 
-if (Test-Port 5173) {
-    Write-Host "⚠️  Le port 5173 est déjà utilisé (frontend)" -ForegroundColor Yellow
+if (Test-Port 3000) {
+    Write-Host "⚠️  Le port 3000 est déjà utilisé (frontend)" -ForegroundColor Yellow
 }
 
 Write-Host "🎯 Démarrage des services..." -ForegroundColor Green
@@ -62,7 +62,7 @@ try {
 
     Write-Host ""
     Write-Host "✅ Services démarrés!" -ForegroundColor Green
-    Write-Host "📱 Frontend: http://localhost:5173" -ForegroundColor Cyan
+    Write-Host "📱 Frontend: http://localhost:3000" -ForegroundColor Cyan
     Write-Host "🔧 Backend API: http://localhost:8000" -ForegroundColor Cyan
     Write-Host "📚 Documentation API: http://localhost:8000/docs" -ForegroundColor Cyan
     Write-Host ""
