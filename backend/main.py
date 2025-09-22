@@ -24,6 +24,7 @@ from bson import ObjectId
 from db import get_db, init_db
 from users import router as users_router, UserInDB, get_current_user, get_password_hash
 
+from utils import export_excel_with_style
 # --- Fonctions utilitaires groupes ---
 def parse_groups(txt):
     if pd.isna(txt) or txt == '':
@@ -56,8 +57,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Import du router utilisateurs/auth ---
+
+# --- Import des routers ---
+from routes.planning import router as planning_router
 app.include_router(users_router)
+app.include_router(planning_router)
 
 # -----------------------
 # Utils semaines dynamiques
