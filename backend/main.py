@@ -15,19 +15,14 @@ from pydantic import BaseModel
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 import os
-from dotenv import load_dotenv
-from pymongo import MongoClient
-from bson import ObjectId
 
+from bson import ObjectId
+from db import get_db, init_db
 
 # Utilisation du nouveau système lifespan pour l'init MongoDB
 @asynccontextmanager
 async def lifespan(app):
-    global mongo_client, db
-    mongo_client = MongoClient(MONGODB_URI)
-    db = mongo_client[MONGODB_DB]
-    # Indexes utiles
-    db.users.create_index("email", unique=True)
+    init_db()
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -43,7 +38,7 @@ app.add_middleware(
 # -----------------------
 # Auth settings & models
 # -----------------------
-load_dotenv()
+
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 8
@@ -75,14 +70,10 @@ class SignupRequest(BaseModel):
     lycee: str
     classes: list[str]
 
-# -----------------------
-# MongoDB setup
-# -----------------------
-MONGODB_URI = os.getenv("MONGODB_URI")
-MONGODB_DB = os.getenv("MONGODB_DB")
 
-mongo_client: Optional[MongoClient] = None
-db = None
+# -----------------------
+# MongoDB setup déplacé dans db.py
+# -----------------------
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -98,6 +89,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 async def get_user(username: str) -> Optional[UserInDB]:
+    db = get_db()
     if db is None:
         return None
     doc = db.users.find_one({"email": username})
@@ -145,6 +137,7 @@ def require_role(*allowed_roles: Literal["utilisateur", "professeur"]):
 # -----------------------
 @app.post("/api/auth/signup", response_model=User)
 async def signup(req: SignupRequest):
+    db = get_db()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not initialized")
     exists = db.users.find_one({"email": req.email})
@@ -183,6 +176,7 @@ class UserProfile(BaseModel):
 
 @app.get("/api/users/me")
 async def get_me(user: UserInDB = Depends(get_current_user)):
+    db = get_db()
     if db is None:
         return JSONResponse(status_code=500, content={"error": "Base de données non initialisée"})
     d = db.users.find_one({"email": user.email})
@@ -199,6 +193,7 @@ async def get_me(user: UserInDB = Depends(get_current_user)):
 
 @app.put("/api/users/me")
 async def update_me(payload: UserProfile, user: UserInDB = Depends(get_current_user)):
+    db = get_db()
     if db is None:
         return JSONResponse(status_code=500, content={"error": "Base de données non initialisée"})
     update_doc = {k: v for k, v in payload.dict().items() if v is not None}
@@ -1200,6 +1195,7 @@ def _safe_object_id(oid: str) -> ObjectId:
 @app.post("/api/plannings/save")
 async def save_planning(name: str = Query(None), user: UserInDB = Depends(get_current_user)):
     global generated_planning
+    db = get_db()
     if db is None:
         return JSONResponse(status_code=500, content={"error": "Base de données non initialisée"})
     if not generated_planning:
@@ -1217,6 +1213,7 @@ async def save_planning(name: str = Query(None), user: UserInDB = Depends(get_cu
 
 @app.get("/api/plannings")
 async def list_plannings(user: UserInDB = Depends(get_current_user)):
+    db = get_db()
     if db is None:
         return JSONResponse(status_code=500, content={"error": "Base de données non initialisée"})
     # On récupère les emails des users du même lycée et ayant au moins une classe en commun
@@ -1244,6 +1241,7 @@ async def list_plannings(user: UserInDB = Depends(get_current_user)):
 
 @app.get("/api/plannings/{planning_id}")
 async def get_planning(planning_id: str, user: UserInDB = Depends(get_current_user)):
+    db = get_db()
     if db is None:
         return JSONResponse(status_code=500, content={"error": "Base de données non initialisée"})
     d = db.plannings.find_one({"_id": _safe_object_id(planning_id)})
@@ -1267,6 +1265,7 @@ async def get_planning(planning_id: str, user: UserInDB = Depends(get_current_us
 
 @app.get("/api/plannings/{planning_id}/download")
 async def download_saved_planning(planning_id: str, format: str = Query("csv", enum=["csv", "excel"]), user: UserInDB = Depends(get_current_user)):
+    db = get_db()
     if db is None:
         return JSONResponse(status_code=500, content={"error": "Base de données non initialisée"})
     d = db.plannings.find_one({"_id": _safe_object_id(planning_id)})
@@ -1310,6 +1309,7 @@ class PasswordChangeRequest(PydanticBaseModel):
 
 @app.put("/api/users/me/password")
 async def change_password(payload: PasswordChangeRequest, user: UserInDB = Depends(get_current_user)):
+    db = get_db()
     if db is None:
         return JSONResponse(status_code=500, content={"error": "Base de données non initialisée"})
     if not payload.password or len(payload.password) < 4:

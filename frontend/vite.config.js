@@ -7,7 +7,7 @@ export default defineConfig({
 
   // Options serveur de dev
   server: {
-    port: 3000,               // 👉 tu bosses sur http://localhost:3000 (comme CRA)
+    port: 3000,               
     open: true,               // ouvre le navigateur automatiquement
     proxy: {
       // Toutes les requêtes commençant par /api seront redirigées vers FastAPI
