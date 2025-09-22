@@ -1,3 +1,4 @@
+
 from fastapi import APIRouter, Query, Depends, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
 import io
@@ -10,14 +11,19 @@ from utils import export_excel_with_style
 
 router = APIRouter()
 
+
 def _safe_object_id(oid: str) -> ObjectId:
 	try:
 		return ObjectId(oid)
 	except Exception:
 		raise HTTPException(status_code=400, detail="Identifiant invalide")
 
+
 @router.post("/api/plannings/save")
-async def save_planning(name: str = Query(None), user: UserInDB = Depends(get_current_user)):
+async def save_planning(
+	name: str = Query(None),
+	user: UserInDB = Depends(get_current_user)
+):
 	from ..main import generated_planning
 	db = get_db()
 	if db is None:
@@ -33,10 +39,17 @@ async def save_planning(name: str = Query(None), user: UserInDB = Depends(get_cu
 		"csv_content": generated_planning,
 	}
 	res = db.plannings.insert_one(doc)
-	return {"id": str(res.inserted_id), "name": doc["name"], "created_at": doc["created_at"].isoformat()}
+	return {
+		"id": str(res.inserted_id),
+		"name": doc["name"],
+		"created_at": doc["created_at"].isoformat()
+	}
+
 
 @router.get("/api/plannings")
-async def list_plannings(user: UserInDB = Depends(get_current_user)):
+async def list_plannings(
+	user: UserInDB = Depends(get_current_user)
+):
 	db = get_db()
 	if db is None:
 		return JSONResponse(status_code=500, content={"error": "Base de données non initialisée"})
@@ -50,7 +63,10 @@ async def list_plannings(user: UserInDB = Depends(get_current_user)):
 		classes = set(u.get("classes", []))
 		if user_classes & classes:
 			allowed_users.add(u["email"])
-	cursor = db.plannings.find({"user": {"$in": list(allowed_users)}}, {"csv_content": 0}).sort("created_at", -1)
+	cursor = db.plannings.find(
+		{"user": {"$in": list(allowed_users)}},
+		{"csv_content": 0}
+	).sort("created_at", -1)
 	items = []
 	for d in cursor:
 		items.append({
@@ -61,8 +77,12 @@ async def list_plannings(user: UserInDB = Depends(get_current_user)):
 		})
 	return {"items": items}
 
+
 @router.get("/api/plannings/{planning_id}")
-async def get_planning(planning_id: str, user: UserInDB = Depends(get_current_user)):
+async def get_planning(
+	planning_id: str,
+	user: UserInDB = Depends(get_current_user)
+):
 	db = get_db()
 	if db is None:
 		return JSONResponse(status_code=500, content={"error": "Base de données non initialisée"})
@@ -82,10 +102,20 @@ async def get_planning(planning_id: str, user: UserInDB = Depends(get_current_us
 	if user_lycee != owner_lycee or not (user_classes & owner_classes):
 		return JSONResponse(status_code=403, content={"error": "Accès refusé à ce planning"})
 	df = pd.read_csv(io.StringIO(d.get("csv_content", "")), sep=';')
-	return {"id": planning_id, "name": d.get("name"), "header": df.columns.tolist(), "rows": df.values.tolist()}
+	return {
+		"id": planning_id,
+		"name": d.get("name"),
+		"header": df.columns.tolist(),
+		"rows": df.values.tolist()
+	}
+
 
 @router.get("/api/plannings/{planning_id}/download")
-async def download_saved_planning(planning_id: str, format: str = Query("csv", enum=["csv", "excel"]), user: UserInDB = Depends(get_current_user)):
+async def download_saved_planning(
+	planning_id: str,
+	format: str = Query("csv", enum=["csv", "excel"]),
+	user: UserInDB = Depends(get_current_user)
+):
 	db = get_db()
 	if db is None:
 		return JSONResponse(status_code=500, content={"error": "Base de données non initialisée"})
