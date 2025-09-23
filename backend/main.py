@@ -1,4 +1,3 @@
-
 # --- Imports standards ---
 import os
 import csv
@@ -24,22 +23,7 @@ from bson import ObjectId
 from db import get_db, init_db
 from users import router as users_router, UserInDB, get_current_user, get_password_hash
 
-from utils import export_excel_with_style
-# --- Fonctions utilitaires groupes ---
-def parse_groups(txt):
-    if pd.isna(txt) or txt == '':
-        return []
-    if 'à' in txt:
-        a, b = txt.split('à')
-        return list(range(int(a.strip()), int(b.strip()) + 1))
-    return [int(str(txt).strip())]
-
-def extract_all_groups(df):
-    all_groups = set()
-    for _, row in df.iterrows():
-        all_groups.update(parse_groups(row['Groupes possibles semaine paire']))
-        all_groups.update(parse_groups(row['Groupes possibles semaine impaire']))
-    return sorted(list(all_groups))
+from utils import export_excel_with_style, convert_form_to_csv
 
 # Utilisation du nouveau système lifespan pour l'init MongoDB
 @asynccontextmanager
@@ -57,11 +41,31 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 # --- Import des routers ---
 from routes.planning import router as planning_router
+from routes.generation import router as generation_router
+
 app.include_router(users_router)
 app.include_router(planning_router)
+app.include_router(generation_router)
+
+
+# --- Fonctions utilitaires groupes ---
+def parse_groups(txt):
+    if pd.isna(txt) or txt == '':
+        return []
+    if 'à' in txt:
+        a, b = txt.split('à')
+        return list(range(int(a.strip()), int(b.strip()) + 1))
+    return [int(str(txt).strip())]
+
+def extract_all_groups(df):
+    all_groups = set()
+    for _, row in df.iterrows():
+        all_groups.update(parse_groups(row['Groupes possibles semaine paire']))
+        all_groups.update(parse_groups(row['Groupes possibles semaine impaire']))
+    return sorted(list(all_groups))
+
 
 # -----------------------
 # Utils semaines dynamiques
@@ -666,50 +670,6 @@ class PlanningAnalyzer:
 # -----------------------
 # API ROUTES
 # -----------------------
-uploaded_csv, generated_planning = None, None
-
-@app.post("/api/upload_csv")
-async def upload_csv(file: UploadFile = File(...), user: UserInDB = Depends(get_current_user)):
-    global uploaded_csv
-    content = await file.read()
-    decoded=content.decode("utf-8")
-    uploaded_csv=decoded
-    reader=csv.reader(io.StringIO(decoded),delimiter=';')
-    rows=list(reader)
-    return {"header":rows[0],"preview":rows[1:6]}
-
-@app.post("/api/generate_planning")
-async def generate_planning(user: UserInDB = Depends(get_current_user)):
-    global uploaded_csv, generated_planning
-    if not uploaded_csv: 
-        return JSONResponse(status_code=400, content={"error":"Aucun fichier CSV uploadé."})
-
-    # Essai 1: mode strict
-    print("[INFO] Tentative mode strict...")
-    df_result, message = generate_planning_with_ortools(uploaded_csv, mode="strict")
-    
-    if df_result is None:
-        # Essai 2: mode relaxed
-        print("[INFO] Échec mode strict, tentative mode relaxed...")
-        df_result, message = generate_planning_with_ortools(uploaded_csv, mode="relaxed")
-        
-        if df_result is None:
-            # Essai 3: mode maximize (sauvegarde)
-            print("[INFO] Échec mode relaxed, tentative mode maximize...")
-            df_result, message = generate_planning_with_ortools(uploaded_csv, mode="maximize")
-            
-            if df_result is None:
-                return JSONResponse(status_code=400, content={"error": "Impossible de générer un planning même en mode sauvegarde"})
-
-    output=io.StringIO()
-    df_result.to_csv(output,sep=';',index=False)
-    generated_planning=output.getvalue()
-    
-    return {
-        "header": df_result.columns.tolist(),
-        "rows": df_result.values.tolist(),
-        "message": message
-    }
 
 @app.post("/api/analyse_planning")
 async def analyse_planning(file: UploadFile = File(...), user: UserInDB = Depends(get_current_user)):
@@ -855,128 +815,6 @@ def group_details(groupe_id: int, user: UserInDB = Depends(get_current_user)):
             content={"error": f"Erreur interne: {str(e)}"}
         )
 
-@app.get("/api/download_planning")
-async def download_planning(format: str = Query("csv", enum=["csv", "excel"]), user: UserInDB = Depends(get_current_user)):
-    global generated_planning
-    if not generated_planning:
-        return JSONResponse(status_code=400, content={"error": "Aucun planning généré."})
-    
-    df = pd.read_csv(io.StringIO(generated_planning), sep=';')
-    
-    if format == "excel":
-        out = io.BytesIO()
-        out = export_excel_with_style(df)
-        out.seek(0)
-        return StreamingResponse(
-            out,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=planning_optimise.xlsx"}
-        )
-    else:  # CSV par défaut
-        return StreamingResponse(
-            io.StringIO(generated_planning),
-            media_type="text/csv",
-            headers={"Content-Disposition": "attachment; filename=planning_optimise.csv"}
-        )
-
-@app.post("/api/generate_from_form")
-async def generate_from_form(form_data: dict, user: UserInDB = Depends(get_current_user)):
-    """
-    Génère un planning à partir des données du formulaire de saisie
-    """
-    global generated_planning
-    
-    try:
-        # Convertir les données du formulaire en CSV
-        csv_content = convert_form_to_csv(form_data)
-        
-        # Générer le planning avec OR-Tools (essai des 3 modes)
-        print("[INFO] Tentative mode strict...")
-        df_result, message = generate_planning_with_ortools(csv_content, mode="strict")
-        
-        if df_result is None:
-            print("[INFO] Échec mode strict, tentative mode relaxed...")
-            df_result, message = generate_planning_with_ortools(csv_content, mode="relaxed")
-            
-            if df_result is None:
-                print("[INFO] Échec mode relaxed, tentative mode maximize...")
-                df_result, message = generate_planning_with_ortools(csv_content, mode="maximize")
-                
-                if df_result is None:
-                    return JSONResponse(
-                        status_code=400, 
-                        content={"error": "Impossible de générer un planning avec les contraintes données"}
-                    )
-
-        # Sauvegarder le planning généré
-        output = io.StringIO()
-        df_result.to_csv(output, sep=';', index=False)
-        generated_planning = output.getvalue()
-        
-        return {
-            "header": df_result.columns.tolist(),
-            "rows": df_result.values.tolist(),
-            "message": message + " (généré depuis le formulaire)"
-        }
-        
-    except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={"error": f"Erreur lors de la génération: {str(e)}"}
-        )
-
-def convert_form_to_csv(form_data):
-    """
-    Convertit les données du formulaire en format CSV équivalent
-    """
-    semaines = form_data.get('semaines', [])
-    professeurs = form_data.get('professeurs', [])
-    creneaux = form_data.get('creneaux', [])
-    
-    # Créer les en-têtes
-    headers = [
-        'Matière', 'Prof', 'Jour', 'Heure',
-        'Groupes possibles semaine paire', 'Groupes possibles semaine impaire',
-        'Travaille les semaines paires', 'Travaille les semaines impaires'
-    ] + [str(s) for s in semaines]
-    
-    # Créer les lignes de données
-    rows = []
-    for creneau in creneaux:
-        # Trouver le professeur correspondant
-        prof_info = None
-        for prof in professeurs:
-            if prof.get('nom') == creneau.get('professeur'):
-                prof_info = prof
-                break
-        
-        if not prof_info:
-            continue
-            
-        # Formater les plages de groupes
-        groupes_paires = f"{creneau.get('groupesPaires', {}).get('min', 1)} à {creneau.get('groupesPaires', {}).get('max', 15)}"
-        groupes_impaires = f"{creneau.get('groupesImpaires', {}).get('min', 1)} à {creneau.get('groupesImpaires', {}).get('max', 15)}"
-        
-        # Ligne de données
-        row = [
-            creneau.get('matiere', ''),
-            creneau.get('professeur', ''),
-            creneau.get('jour', ''),
-            creneau.get('heure', ''),
-            groupes_paires,
-            groupes_impaires,
-            'Oui' if prof_info.get('travaillePaires', True) else 'Non',
-            'Oui' if prof_info.get('travailleImpaires', True) else 'Non'
-        ] + [''] * len(semaines)  # Colonnes semaines vides initialement
-        
-        rows.append(row)
-    
-    # Créer le CSV
-    csv_content = ';'.join(headers) + '\n'
-    for row in rows:
-        csv_content += ';'.join(str(cell) for cell in row) + '\n'
-    
-    return csv_content
 
 @app.get("/api/hello")
 def hello():
