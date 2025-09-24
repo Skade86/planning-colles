@@ -12,6 +12,14 @@ export default function SaisiePage() {
     nombreGroupes: 15,
     professeurs: [],
     creneaux: [],
+    reglesAlternance: {
+      'Mathématiques': { active: true, frequence: 1 }, // 1 = chaque semaine
+      'Physique': { active: true, frequence: 2 }, // 2 = quinzaine
+      'Chimie': { active: false, frequence: 4 }, // désactivée par défaut
+      'Anglais': { active: true, frequence: 2 },
+      'Français': { active: false, frequence: 8 }, // désactivée par défaut
+      'S.I': { active: false, frequence: 4 } // désactivée par défaut
+    },
     loading: false,
     message: null
   });
@@ -125,6 +133,20 @@ export default function SaisiePage() {
     }));
   };
 
+  // Modifier une règle d'alternance
+  const modifierRegleAlternance = (matiere, propriete, valeur) => {
+    setFormData(prev => ({
+      ...prev,
+      reglesAlternance: {
+        ...prev.reglesAlternance,
+        [matiere]: {
+          ...prev.reglesAlternance[matiere],
+          [propriete]: valeur
+        }
+      }
+    }));
+  };
+
   // Générer et télécharger le CSV d'entrée
   const exporterCSV = () => {
     if (!validerFormulaire()) return;
@@ -168,7 +190,8 @@ export default function SaisiePage() {
         semaines: formData.semaines,
         nombreGroupes: formData.nombreGroupes,
         professeurs: formData.professeurs,
-        creneaux: formData.creneaux
+        creneaux: formData.creneaux,
+        reglesAlternance: formData.reglesAlternance
       };
       
       const response = await fetch(`${BASE_URL}/api/generate_from_form`, {
@@ -318,6 +341,46 @@ export default function SaisiePage() {
                 />
               </Form.Group>
             </Col>
+          </Row>
+        </Card.Body>
+      </Card>
+
+      {/* Règles d'alternance */}
+      <Card className="mb-4">
+        <Card.Header><h4>Règles d'alternance des matières</h4></Card.Header>
+        <Card.Body>
+          <p className="text-muted mb-3">
+            Configurez la fréquence des colles pour chaque matière (en semaines). 
+            Décochez une matière pour la désactiver complètement.
+          </p>
+          <Row>
+            {matieresOptions.map(matiere => (
+              <Col md={6} key={matiere} className="mb-3">
+                <Form.Check
+                  type="checkbox"
+                  id={`regle-${matiere}`}
+                  label={matiere}
+                  checked={formData.reglesAlternance[matiere]?.active || false}
+                  onChange={(e) => modifierRegleAlternance(matiere, 'active', e.target.checked)}
+                  className="mb-2"
+                />
+                {formData.reglesAlternance[matiere]?.active && (
+                  <Form.Group>
+                    <Form.Label className="small">Fréquence (en semaines)</Form.Label>
+                    <Form.Select
+                      size="sm"
+                      value={formData.reglesAlternance[matiere]?.frequence || 2}
+                      onChange={(e) => modifierRegleAlternance(matiere, 'frequence', parseInt(e.target.value))}
+                    >
+                      <option value={1}>Chaque semaine (1 colle/semaine)</option>
+                      <option value={2}>Quinzaine (1 colle/2 semaines)</option>
+                      <option value={4}>Mensuelle (1 colle/4 semaines)</option>
+                      <option value={8}>Bimestrielle (1 colle/8 semaines)</option>
+                    </Form.Select>
+                  </Form.Group>
+                )}
+              </Col>
+            ))}
           </Row>
         </Card.Body>
       </Card>

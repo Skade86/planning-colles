@@ -11,8 +11,8 @@ import FormatToggle from './components/FormatToggle';
 import SavePlanningButton from './components/SavePlanningButton';
 import MesPlannings from './components/MesPlannings';
 import MonProfil from './components/MonProfil';
-import { Navbar, Nav, Container } from "react-bootstrap";
-import Form from 'react-bootstrap/Form';  // 👉 à ajouter en haut
+import { Navbar, Nav, Container, Card, Row, Col } from "react-bootstrap";
+import Form from 'react-bootstrap/Form';
 import './App.css';
 import Login from './components/Login';
 import { useAuth } from './AuthContext';
@@ -30,6 +30,32 @@ function App() {
 
   // Format de téléchargement global
   const [downloadFormat, setDownloadFormat] = useState('csv');
+
+  // Configuration des règles d'alternance pour la page Planning
+  const [reglesAlternance, setReglesAlternance] = useState({
+    'Mathématiques': { active: true, frequence: 1 }, // 1 = chaque semaine
+    'Physique': { active: true, frequence: 2 }, // 2 = quinzaine
+    'Chimie': { active: true, frequence: 4 }, // 4 semaines par défaut
+    'Anglais': { active: true, frequence: 2 }, // quinzaine
+    'Français': { active: true, frequence: 8 }, // 8 semaines
+    'S.I': { active: true, frequence: 4 } // 4 semaines
+  });
+
+  // Options prédéfinies
+  const matieresOptions = [
+    'Mathématiques', 'Physique', 'Chimie', 'Anglais', 'Français', 'S.I'
+  ];
+
+  // Modifier une règle d'alternance
+  const modifierRegleAlternance = (matiere, propriete, valeur) => {
+    setReglesAlternance(prev => ({
+      ...prev,
+      [matiere]: {
+        ...prev[matiere],
+        [propriete]: valeur
+      }
+    }));
+  };
 
   // Charger la liste des groupes après génération d'un planning
   useEffect(() => {
@@ -104,11 +130,54 @@ function App() {
             ) : (
               <Login />
             )}
+            
+            {/* Configuration des règles d'alternance */}
+            {isAuthenticated && (
+              <Card className="mb-4 mt-4">
+                <Card.Header><h5>⚙️ Configuration des règles d'alternance</h5></Card.Header>
+                <Card.Body>
+                  <p className="text-muted mb-3">
+                    Configurez la fréquence des colles pour chaque matière (en semaines). 
+                    Décochez une matière pour la désactiver complètement.
+                  </p>
+                  <Row>
+                    {matieresOptions.map(matiere => (
+                      <Col md={6} key={matiere} className="mb-3">
+                        <Form.Check
+                          type="checkbox"
+                          id={`regle-planning-${matiere}`}
+                          label={matiere}
+                          checked={reglesAlternance[matiere]?.active || false}
+                          onChange={(e) => modifierRegleAlternance(matiere, 'active', e.target.checked)}
+                          className="mb-2"
+                        />
+                        {reglesAlternance[matiere]?.active && (
+                          <Form.Group>
+                            <Form.Label className="small">Fréquence (en semaines)</Form.Label>
+                            <Form.Select
+                              size="sm"
+                              value={reglesAlternance[matiere]?.frequence || 2}
+                              onChange={(e) => modifierRegleAlternance(matiere, 'frequence', parseInt(e.target.value))}
+                            >
+                              <option value={1}>Chaque semaine (1 colle/semaine)</option>
+                              <option value={2}>Quinzaine (1 colle/2 semaines)</option>
+                              <option value={4}>Mensuelle (1 colle/4 semaines)</option>
+                              <option value={8}>Bimestrielle (1 colle/8 semaines)</option>
+                            </Form.Select>
+                          </Form.Group>
+                        )}
+                      </Col>
+                    ))}
+                  </Row>
+                </Card.Body>
+              </Card>
+            )}
+            
             {preview && <PlanningTable planning={preview} title="Prévisualisation du CSV" />}
 
             {isAuthenticated && (
               <div className="d-flex flex-wrap gap-2 mt-2">
-                <GenerateButton setPlanning={setPlanning} setStatus={setStatus} />
+                <GenerateButton setPlanning={setPlanning} setStatus={setStatus} reglesAlternance={reglesAlternance} />
                 <SavePlanningButton defaultName={"Planning"} onSaved={() => {}} />
               </div>
             )}

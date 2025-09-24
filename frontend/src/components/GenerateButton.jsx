@@ -3,14 +3,19 @@ import React from 'react';
 import Button from 'react-bootstrap/Button';
 import { useAuth } from '../AuthContext';
 
-function GenerateButton({ setPlanning, setStatus }) {
+function GenerateButton({ setPlanning, setStatus, reglesAlternance }) {
   const { token } = useAuth();
   const handleGenerate = async () => {
     setStatus({ type: 'info', text: 'Génération du planning...' });
+    console.log('[DEBUG] Règles d\'alternance envoyées:', reglesAlternance);
     try {
-  const res = await fetch(`${BASE_URL}/api/generate_planning`, {
+      const res = await fetch(`${BASE_URL}/api/generate_planning`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: reglesAlternance ? JSON.stringify({ reglesAlternance }) : undefined
       });
       if (!res.ok) throw new Error('Erreur réseau');
       const data = await res.json();

@@ -2,12 +2,13 @@
 import os
 import csv
 import io
+import json
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 # --- Imports externes ---
 import pandas as pd
-from fastapi import FastAPI, UploadFile, File, Query, Depends, HTTPException, status
+from fastapi import FastAPI, UploadFile, File, Query, Depends, HTTPException, status, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -56,13 +57,38 @@ app.include_router(generation_router)
 # -----------------------
 
 class PlanningAnalyzer:
-    def __init__(self, csv_content):
+    def __init__(self, csv_content, regles_alternance=None):
         self.df = pd.read_csv(io.StringIO(csv_content), sep=';')
 
         # Semaines dynamiques (colonnes numériques, ordre du CSV, non trié)
         self.weeks = [int(c) for c in self.df.columns if str(c).isdigit()]
         # NE PAS trier les semaines, respecter l'ordre du CSV
-        self.groups = list(range(1, 16))  # 15 groupes
+        
+        # Détection automatique du nombre de groupes basé sur les données réelles
+        all_groups = set()
+        for week in self.weeks:
+            week_str = str(week)
+            for _, row in self.df.iterrows():
+                val = row.get(week_str, "")
+                try:
+                    g = int(val)
+                    if g > 0:  # Ignorer les valeurs négatives ou nulles
+                        all_groups.add(g)
+                except (ValueError, TypeError):
+                    continue
+        
+        # Créer la liste des groupes triée
+        self.groups = sorted(list(all_groups)) if all_groups else list(range(1, 16))  # fallback à 15 si aucun groupe détecté
+        
+        # Règles d'alternance configurables (par défaut: anciennes règles hardcodées)
+        self.regles_alternance = regles_alternance or {
+            'Mathématiques': { 'active': True, 'frequence': 2 },
+            'Physique': { 'active': True, 'frequence': 2 },
+            'Chimie': { 'active': True, 'frequence': 4 },
+            'Anglais': { 'active': True, 'frequence': 2 },
+            'Français': { 'active': True, 'frequence': 8 },
+            'S.I': { 'active': True, 'frequence': 4 }
+        }
 
         def make_windows_non_overlapping(weeks, size):
             return [tuple(weeks[i:i+size]) for i in range(0, len(weeks), size)
@@ -129,49 +155,62 @@ class PlanningAnalyzer:
                 if g == groupe:
                     group_weeks[week].append([row["Matière"], row["Prof"], row["Jour"], row["Heure"]])
 
-        # Maths / Physique / Anglais → 1 par quinzaine
-        for matiere in ["Mathématiques", "Physique", "Anglais"]:
-            for quin in self.groups_2:
-                count = sum(
-                    sum(1 for colle in group_weeks.get(w, []) if colle[0] == matiere)
-                    for w in quin
-                )
-                if count != 1:
-                    erreurs.append(f"{matiere} - Quinzaine {quin}: {count} colles (attendu: 1)")
-
-        # Chimie / SI → 1 par 4 semaines
-        for matiere in ["Chimie", "S.I"]:
-            for bloc in self.groups_4:
-                count = sum(
-                    sum(1 for colle in group_weeks.get(w, []) if colle[0] == matiere)
-                    for w in bloc
-                )
-                if count != 1:
-                    erreurs.append(f"{matiere} - Bloc {bloc}: {count} colles (attendu: 1)")
-
-        # Français → 1 par 8 semaines (vérification robuste)
-        if self.groups_8:
-            # Si on a des blocs de 8 semaines complets, on les utilise
-            for bloc in self.groups_8:
-                count = sum(
-                    sum(1 for colle in group_weeks.get(w, [])
-                        if colle[0].strip().lower() in ["français", "francais"])
-                    for w in bloc
-                )
-                if count != 1:
-                    erreurs.append(f"Français - Bloc {bloc}: {count} colles (attendu: 1)")
-        else:
-            # Si pas de bloc de 8 semaines complet, on vérifie sur toute la période
-            # (max 1 colle de français sur toute la période)
-            count = sum(
-                sum(1 for colle in group_weeks.get(w, [])
-                    if colle[0].strip().lower() in ["français", "francais"])
-                for w in self.weeks
-            )
-            if count > 1:
-                erreurs.append(f"Français - Période complète {tuple(self.weeks)}: {count} colles (max 1 autorisée sur {len(self.weeks)} semaines)")
-                erreurs.append(f"Français - Période complète {tuple(self.weeks)}: {count} colles (max 1 autorisée)")
-            # Note: on n'exige pas 1 colle si la période est courte
+        # Vérification dynamique basée sur les règles configurables
+        for matiere, regle in self.regles_alternance.items():
+            if not regle.get('active', False):
+                continue  # Ignorer les matières non activées
+                
+            frequence = regle.get('frequence', 2)
+            
+            if frequence == 1:
+                # Chaque semaine - vérifier chaque semaine individuellement
+                for week in self.weeks:
+                    count = sum(1 for colle in group_weeks.get(week, []) if colle[0] == matiere)
+                    if count != 1:
+                        erreurs.append(f"{matiere} - Semaine {week}: {count} colles (attendu: 1 chaque semaine)")
+                        
+            elif frequence == 2:
+                # Quinzaine - utiliser groups_2
+                for quin in self.groups_2:
+                    count = sum(
+                        sum(1 for colle in group_weeks.get(w, []) if colle[0] == matiere)
+                        for w in quin
+                    )
+                    if count != 1:
+                        erreurs.append(f"{matiere} - Quinzaine {quin}: {count} colles (attendu: 1)")
+                        
+            elif frequence == 4:
+                # 4 semaines - utiliser groups_4
+                for bloc in self.groups_4:
+                    count = sum(
+                        sum(1 for colle in group_weeks.get(w, []) if colle[0] == matiere)
+                        for w in bloc
+                    )
+                    if count != 1:
+                        erreurs.append(f"{matiere} - Bloc {bloc}: {count} colles (attendu: 1)")
+                        
+            elif frequence == 8:
+                # 8 semaines - utiliser groups_8 ou vérification globale
+                if self.groups_8:
+                    # Si on a des blocs de 8 semaines complets, on les utilise
+                    for bloc in self.groups_8:
+                        count = sum(
+                            sum(1 for colle in group_weeks.get(w, []) 
+                                if colle[0].strip().lower() == matiere.strip().lower())
+                            for w in bloc
+                        )
+                        if count != 1:
+                            erreurs.append(f"{matiere} - Bloc {bloc}: {count} colles (attendu: 1)")
+                else:
+                    # Si pas de bloc de 8 semaines complet, on vérifie sur toute la période
+                    # (max 1 colle sur toute la période)
+                    count = sum(
+                        sum(1 for colle in group_weeks.get(w, [])
+                            if colle[0].strip().lower() == matiere.strip().lower())
+                        for w in self.weeks
+                    )
+                    if count > 1:
+                        erreurs.append(f"{matiere} - Période complète {tuple(self.weeks)}: {count} colles (max 1 autorisée)")
 
         # Pas plus d'1 colle par jour
         for week in self.weeks:
@@ -382,16 +421,25 @@ class PlanningAnalyzer:
 # -----------------------
 
 @app.post("/api/analyse_planning")
-async def analyse_planning(file: UploadFile = File(...), user: UserInDB = Depends(get_current_user)):
+async def analyse_planning(file: UploadFile = File(...), reglesAlternance: str = Form(None)):
     """
-    Attend un upload CSV via form-data: clé "file"
+    Attend un upload CSV via form-data: clé "file" + règles d'alternance optionnelles
     """
     if not file:
         return JSONResponse(content={"error": "Aucun fichier reçu"}, status_code=400)
 
     try:
         content = (await file.read()).decode("utf-8")
-        analyzer = PlanningAnalyzer(content)
+        
+        # Parse les règles d'alternance si fournies
+        regles = {}
+        if reglesAlternance:
+            try:
+                regles = json.loads(reglesAlternance)
+            except json.JSONDecodeError:
+                return JSONResponse(content={"error": "Format invalide pour reglesAlternance"}, status_code=400)
+        
+        analyzer = PlanningAnalyzer(content, regles_alternance=regles)
 
         stats = {
             "groupes": analyzer.stats_groupes(),
@@ -423,16 +471,20 @@ async def analyse_planning(file: UploadFile = File(...), user: UserInDB = Depend
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
-@app.get("/api/analyse_planning_generated")
-def analyse_planning_generated(user: UserInDB = Depends(get_current_user)):
+class AnalysisRequest(BaseModel):
+    reglesAlternance: dict = {}
+
+@app.post("/api/analyse_planning_generated")
+def analyse_planning_generated(request: AnalysisRequest):
     """
     Analyse le planning généré en mémoire (sans upload de fichier)
+    Accepte les règles d'alternance configurables en JSON
     """
     if not shared_state.generated_planning:
         return JSONResponse(status_code=400, content={"error": "Aucun planning généré."})
 
     try:
-        analyzer = PlanningAnalyzer(shared_state.generated_planning)
+        analyzer = PlanningAnalyzer(shared_state.generated_planning, regles_alternance=request.reglesAlternance)
 
         stats = {
             "groupes": analyzer.stats_groupes(),

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Query, Depends
+from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 import io
 import csv
@@ -20,18 +20,28 @@ async def upload_csv(file: UploadFile = File(...), user: UserInDB = Depends(get_
     return {"header": rows[0], "preview": rows[1:6]}
 
 @router.post("/api/generate_planning")
-async def generate_planning(user: UserInDB = Depends(get_current_user)):
+async def generate_planning(request: Request, user: UserInDB = Depends(get_current_user)):
     if not shared_state.uploaded_csv:
         return JSONResponse(status_code=400, content={"error": "Aucun fichier CSV uploadé."})
     
+    # Récupération des règles d'alternance si fournies
+    regles_alternance = None
+    try:
+        body = await request.json()
+        regles_alternance = body.get('reglesAlternance') if body else None
+        print(f"[DEBUG] Règles d'alternance reçues: {regles_alternance}")
+    except Exception as e:
+        print(f"[DEBUG] Pas de body JSON ou erreur: {e}")
+        regles_alternance = None
+    
     print("[INFO] Tentative mode strict...")
-    df_result, message = generate_planning_with_ortools(shared_state.uploaded_csv, mode="strict")
+    df_result, message = generate_planning_with_ortools(shared_state.uploaded_csv, mode="strict", regles_alternance=regles_alternance)
     if df_result is None:
         print("[INFO] Échec mode strict, tentative mode relaxed...")
-        df_result, message = generate_planning_with_ortools(shared_state.uploaded_csv, mode="relaxed")
+        df_result, message = generate_planning_with_ortools(shared_state.uploaded_csv, mode="relaxed", regles_alternance=regles_alternance)
         if df_result is None:
             print("[INFO] Échec mode relaxed, tentative mode maximize...")
-            df_result, message = generate_planning_with_ortools(shared_state.uploaded_csv, mode="maximize")
+            df_result, message = generate_planning_with_ortools(shared_state.uploaded_csv, mode="maximize", regles_alternance=regles_alternance)
             if df_result is None:
                 return JSONResponse(status_code=400, content={"error": "Impossible de générer un planning même en mode sauvegarde"})
     output = io.StringIO()
@@ -48,14 +58,16 @@ async def generate_from_form(form_data: dict, user: UserInDB = Depends(get_curre
     global generated_planning
     try:
         csv_content = convert_form_to_csv(form_data)
+        regles_alternance = form_data.get('reglesAlternance', {})
+        
         print("[INFO] Tentative mode strict...")
-        df_result, message = generate_planning_with_ortools(csv_content, mode="strict")
+        df_result, message = generate_planning_with_ortools(csv_content, mode="strict", regles_alternance=regles_alternance)
         if df_result is None:
             print("[INFO] Échec mode strict, tentative mode relaxed...")
-            df_result, message = generate_planning_with_ortools(csv_content, mode="relaxed")
+            df_result, message = generate_planning_with_ortools(csv_content, mode="relaxed", regles_alternance=regles_alternance)
             if df_result is None:
                 print("[INFO] Échec mode relaxed, tentative mode maximize...")
-                df_result, message = generate_planning_with_ortools(csv_content, mode="maximize")
+                df_result, message = generate_planning_with_ortools(csv_content, mode="maximize", regles_alternance=regles_alternance)
                 if df_result is None:
                     return JSONResponse(status_code=400, content={"error": "Impossible de générer un planning avec les contraintes données"})
         output = io.StringIO()
