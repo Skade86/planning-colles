@@ -8,6 +8,7 @@ from bson import ObjectId
 from db import get_db
 from users import UserInDB, get_current_user, get_password_hash
 from utils import export_excel_with_style
+import shared_state
 
 router = APIRouter()
 
@@ -23,11 +24,10 @@ async def save_planning(
 	name: str = Query(None),
 	user: UserInDB = Depends(get_current_user)
 ):
-	from ..main import generated_planning
 	db = get_db()
 	if db is None:
 		return JSONResponse(status_code=500, content={"error": "Base de données non initialisée"})
-	if not generated_planning:
+	if not shared_state.generated_planning:
 		return JSONResponse(status_code=400, content={"error": "Aucun planning généré à sauvegarder"})
 
 	now = datetime.now(timezone.utc)
@@ -35,7 +35,7 @@ async def save_planning(
 		"user": user.email,
 		"name": name or f"Planning {now.date().isoformat()} {now.strftime('%H:%M')}",
 		"created_at": now,
-		"csv_content": generated_planning,
+		"csv_content": shared_state.generated_planning,
 	}
 	res = db.plannings.insert_one(doc)
 	return {
