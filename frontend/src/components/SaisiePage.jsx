@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { Form, Button, Card, Row, Col, Alert } from 'react-bootstrap';
+import { useAuth } from '../AuthContext';
 
 const BASE_URL = import.meta.env.VITE_API_URL;
 
 export default function SaisiePage() {
+  const { token } = useAuth();
   // État pour les données du formulaire
   const [formData, setFormData] = useState({
     semaines: [],
@@ -47,7 +49,7 @@ export default function SaisiePage() {
     };
     setFormData(prev => ({
       ...prev,
-      professeurs: [...prev.professeurs, nouveauProf]
+      professeurs: [nouveauProf,...prev.professeurs]
     }));
   };
 
@@ -77,12 +79,12 @@ export default function SaisiePage() {
       professeur: '',
       jour: '',
       heure: '',
-      groupesPaires: { min: 1, max: 15 },
-      groupesImpaires: { min: 1, max: 15 }
+      groupesPaires: { min: 1, max: formData.nombreGroupes },
+      groupesImpaires: { min: 1, max: formData.nombreGroupes }
     };
     setFormData(prev => ({
       ...prev,
-      creneaux: [...prev.creneaux, nouveauCreneau]
+      creneaux: [nouveauCreneau,...prev.creneaux]
     }));
   };
 
@@ -101,6 +103,25 @@ export default function SaisiePage() {
     setFormData(prev => ({
       ...prev,
       creneaux: prev.creneaux.filter(creneau => creneau.id !== id)
+    }));
+  };
+
+  // Changer le nombre de groupes et mettre à jour les créneaux existants
+  const changerNombreGroupes = (nouveauNombre) => {
+    setFormData(prev => ({
+      ...prev,
+      nombreGroupes: nouveauNombre,
+      creneaux: prev.creneaux.map(creneau => ({
+        ...creneau,
+        groupesPaires: {
+          min: Math.min(creneau.groupesPaires.min, nouveauNombre),
+          max: Math.min(creneau.groupesPaires.max, nouveauNombre)
+        },
+        groupesImpaires: {
+          min: Math.min(creneau.groupesImpaires.min, nouveauNombre),
+          max: Math.min(creneau.groupesImpaires.max, nouveauNombre)
+        }
+      }))
     }));
   };
 
@@ -152,7 +173,10 @@ export default function SaisiePage() {
       
       const response = await fetch(`${BASE_URL}/api/generate_from_form`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(donneesFormulaire)
       });
 
@@ -288,10 +312,7 @@ export default function SaisiePage() {
                 <Form.Control
                   type="number"
                   value={formData.nombreGroupes}
-                  onChange={(e) => setFormData(prev => ({ 
-                    ...prev, 
-                    nombreGroupes: parseInt(e.target.value) || 15 
-                  }))}
+                  onChange={(e) => changerNombreGroupes(parseInt(e.target.value) || 15)}
                   min="1"
                   max="30"
                 />
