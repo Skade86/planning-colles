@@ -142,12 +142,6 @@ export default function Login() {
           {mode === 'login' ? "Créer un compte" : 'Déjà un compte ? Connexion'}
         </button>
       </form>
-      <div className="mt-3">
-        <small>Comptes de démo:<br/>
-          • Professeur: <b>admin@demo.fr / admin</b><br/>
-          • Utilisateur: <b>user@demo.fr / user</b>
-        </small>
-      </div>
     </div>
   );
 }

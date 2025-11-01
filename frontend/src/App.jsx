@@ -11,6 +11,7 @@ import FormatToggle from './components/FormatToggle';
 import SavePlanningButton from './components/SavePlanningButton';
 import MesPlannings from './components/MesPlannings';
 import MonProfil from './components/MonProfil';
+import AccueilPage from './components/AccueilPage';
 import { Navbar, Nav, Container, Card, Row, Col } from "react-bootstrap";
 import Form from 'react-bootstrap/Form';
 import './App.css';
@@ -22,7 +23,7 @@ function App() {
   const [planning, setPlanning] = useState(null);
   const [preview, setPreview] = useState(null);
   const [status, setStatus] = useState(null);
-  const [currentPage, setCurrentPage] = useState('saisie'); // onglet actif par défaut
+  const [currentPage, setCurrentPage] = useState('accueil'); // page d'accueil par défaut
 
   // Nouveaux states pour gestion groupes
   const [groups, setGroups] = useState([]);
@@ -33,12 +34,12 @@ function App() {
 
   // Configuration des règles d'alternance pour la page Planning
   const [reglesAlternance, setReglesAlternance] = useState({
-    'Mathématiques': { active: true, frequence: 1 }, // 1 = chaque semaine
-    'Physique': { active: true, frequence: 2 }, // 2 = quinzaine
-    'Chimie': { active: true, frequence: 4 }, // 4 semaines par défaut
-    'Anglais': { active: true, frequence: 2 }, // quinzaine
-    'Français': { active: true, frequence: 8 }, // 8 semaines
-    'S.I': { active: true, frequence: 4 } // 4 semaines
+    'Mathématiques': { active: true, frequence: 1 }, 
+    'Physique': { active: true, frequence: 2 }, 
+    'Chimie': { active: true, frequence: 4 }, 
+    'Anglais': { active: true, frequence: 2 }, 
+    'Français': { active: true, frequence: 8 },
+    'S.I': { active: true, frequence: 4 } 
   });
 
   // Options prédéfinies
@@ -73,6 +74,32 @@ function App() {
     }
   }, [planning, user]);
 
+  // Rediriger vers l'accueil si l'utilisateur se déconnecte et n'est pas déjà sur l'accueil
+  useEffect(() => {
+    if (!isAuthenticated && currentPage !== 'accueil') {
+      setCurrentPage('accueil');
+    }
+  }, [isAuthenticated, currentPage]);
+
+  // Fonction pour gérer la navigation avec contrôle d'authentification
+  const handleNavigation = (selectedKey) => {
+    // Accueil est toujours accessible
+    if (selectedKey === 'accueil') {
+      setCurrentPage(selectedKey);
+      return;
+    }
+
+    // Pour toutes les autres pages, vérifier l'authentification
+    if (!isAuthenticated) {
+      // Rediriger vers l'accueil si non connecté
+      setCurrentPage('accueil');
+      return;
+    }
+
+    // Si connecté, navigation normale
+    setCurrentPage(selectedKey);
+  };
+
   return (
     <div>
       {/* ✅ Header avec titre + navbar */}
@@ -84,15 +111,53 @@ function App() {
             <Navbar.Collapse id="main-navbar-nav">
               <Nav
                 activeKey={currentPage}
-                onSelect={(selectedKey) => setCurrentPage(selectedKey)}
+                onSelect={handleNavigation}
                 className="me-auto"
               >
-                <Nav.Link eventKey="saisie">Saisie</Nav.Link>
-                <Nav.Link eventKey="planning">Planning</Nav.Link>
-                <Nav.Link eventKey="analyse">Analyse</Nav.Link>
-                <Nav.Link eventKey="mesplannings">Mes plannings</Nav.Link>
-                <Nav.Link eventKey="profil">Mon profil</Nav.Link>
-                <Nav.Link eventKey="groupe">Détail groupe</Nav.Link>
+                <Nav.Link eventKey="accueil">🏠 Accueil</Nav.Link>
+                <Nav.Link 
+                  eventKey="saisie" 
+                  disabled={!isAuthenticated}
+                  className={!isAuthenticated ? 'text-muted' : ''}
+                >
+                  Saisie {!isAuthenticated && '🔒'}
+                </Nav.Link>
+                <Nav.Link 
+                  eventKey="planning" 
+                  disabled={!isAuthenticated}
+                  className={!isAuthenticated ? 'text-muted' : ''}
+                >
+                  Planning {!isAuthenticated && '🔒'}
+                </Nav.Link>
+                <Nav.Link 
+                  eventKey="analyse" 
+                  disabled={!isAuthenticated}
+                  className={!isAuthenticated ? 'text-muted' : ''}
+                >
+                  Analyse {!isAuthenticated && '🔒'}
+                </Nav.Link>
+                <Nav.Link 
+                  eventKey="groupe" 
+                  disabled={!isAuthenticated}
+                  className={!isAuthenticated ? 'text-muted' : ''}
+                >
+                  Détail groupe {!isAuthenticated && '🔒'}
+                </Nav.Link>
+                <Nav.Link 
+                  eventKey="mesplannings" 
+                  disabled={!isAuthenticated}
+                  className={!isAuthenticated ? 'text-muted' : ''}
+                >
+                  Mes plannings {!isAuthenticated && '🔒'}
+                </Nav.Link>
+                <Nav.Link 
+                  eventKey="profil" 
+                  disabled={!isAuthenticated}
+                  className={!isAuthenticated ? 'text-muted' : ''}
+                >
+                  Mon profil {!isAuthenticated && '🔒'}
+                </Nav.Link>
+                
               </Nav>
               <div className="text-white me-3 d-flex align-items-center">
                 {isAuthenticated ? (
@@ -111,6 +176,11 @@ function App() {
 
       {/* ✅ Contenu principal */}
       <main className="container-fluid mt-4">
+        {/* Page Accueil */}
+        {currentPage === 'accueil' && (
+          <AccueilPage setCurrentPage={setCurrentPage} />
+        )}
+
         {/* Page Saisie */}
         {currentPage === 'saisie' && (
           isAuthenticated ? <SaisiePage /> : <Login />
