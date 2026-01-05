@@ -7,12 +7,27 @@ services:
       - ./backend:/app
     environment:
       - PYTHONUNBUFFERED=1
+      - MONGODB_URI=mongodb://mongo:27017
+      - MONGODB_DB=planning_colles
+    depends_on:
+      - mongo
 
   frontend:
     build: ./frontend
     ports:
-      - "3000:80"
+      - "3000:3000" # Port 80 is privileged, 3000 is safer and matches Vite's default
     volumes:
       - ./frontend:/app
+      - /app/node_modules # Anonymous volume to prevent host node_modules from overwriting container's
     depends_on:
       - backend
+
+  mongo:
+    image: mongo:latest
+    ports:
+      - "27017:27017" # Expose for local debugging if needed
+    volumes:
+      - mongo-data:/data/db
+
+volumes:
+  mongo-data:
